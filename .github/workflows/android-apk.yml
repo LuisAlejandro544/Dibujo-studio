@@ -8,7 +8,8 @@
 # Reglas del flujo:
 # - Activación 100% manual (`workflow_dispatch`): NO se activa en commits, pull requests ni issues.
 # - Sin caché (`cache-disabled: true`, `--no-build-cache`, `--no-daemon`, sin `actions/cache`).
-# - Descarga todo el código (`fetch-depth: 0`), instala Android SDK/NDK, Rust (32-bit y 64-bit),
+# - Permite elegir entre APK Debug universal (32/64-bit) o solo 64 bits (`arm64-v8a`).
+# - Descarga todo el código (`fetch-depth: 0`), instala Android SDK/NDK, Rust,
 #   descarga y compila dependencias de Rust, ejecuta `cargo test` y compila el APK Debug en Kotlin.
 
 name: Compilar APK Debug (Manual)
@@ -16,6 +17,14 @@ name: Compilar APK Debug (Manual)
 on:
   workflow_dispatch:
     inputs:
+      abi_mode:
+        description: "Arquitectura del APK Debug (universal = 32/64-bit, arm64-v8a = solo 64-bit)"
+        required: true
+        default: "universal"
+        type: choice
+        options:
+          - universal
+          - arm64-v8a
       verify_apk_contents:
         description: "Inspeccionar librerías .so y classes.dex dentro del APK Debug"
         required: false
@@ -24,7 +33,7 @@ on:
 
 jobs:
   build-debug-apk:
-    name: Compilar TrazoStudio Debug APK (Kotlin + Rust 32/64-bit)
+    name: Compilar TrazoStudio Debug APK (${{ inputs.abi_mode }})
     runs-on: ubuntu-latest
 
     steps:
@@ -83,14 +92,10 @@ jobs:
           echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
           echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
 
-      - name: Instalar Rust estable y targets Android (32-bit y 64-bit)
+      - name: Instalar Rust estable y targets Android (${{ inputs.abi_mode }})
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: >
-            armv7-linux-androideabi,
-            aarch64-linux-android,
-            i686-linux-android,
-            x86_64-linux-android
+          targets: ${{ inputs.abi_mode == 'arm64-v8a' && 'aarch64-linux-android' || 'armv7-linux-androideabi,aarch64-linux-android,i686-linux-android,x86_64-linux-android' }}
 
       - name: Instalar cargo-ndk para compilar librerías .so de Android
         run: cargo install cargo-ndk --locked
@@ -107,16 +112,17 @@ jobs:
           gradle-version: '8.9'
           cache-disabled: true
 
-      - name: Compilar librerías Rust (32/64-bit) y código Kotlin en APK Debug
+      - name: Compilar librerías Rust (${{ inputs.abi_mode }}) y código Kotlin en APK Debug
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --no-build-cache --no-daemon --stacktrace
+          ./gradlew :app:assembleDebug -PtrazoAbiMode=${{ inputs.abi_mode }} --no-build-cache --no-daemon --stacktrace
 
       - name: Verificar contenido del APK Debug generado
         if: ${{ inputs.verify_apk_contents }}
         run: |
           APK_PATH=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          echo "Modo elegido: ${{ inputs.abi_mode }}"
           echo "APK generado en: $APK_PATH"
           ls -lh "$APK_PATH"
           unzip -l "$APK_PATH" | grep -E "libtrazo_engine\.so|classes.*\.dex"
@@ -124,7 +130,7 @@ jobs:
       - name: Subir APK Debug como artefacto descargable
         uses: actions/upload-artifact@v4
         with:
-          name: TrazoStudio-Debug-APK
+          name: TrazoStudio-Debug-APK-${{ inputs.abi_mode }}
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14

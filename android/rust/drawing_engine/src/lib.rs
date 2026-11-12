@@ -12,7 +12,7 @@ mod types;
 
 use std::sync::Arc;
 
-use jni::objects::{JByteArray, JByteBuffer, JClass, JString};
+use jni::objects::{JByteArray, JByteBuffer, JClass, JFloatArray, JString};
 use jni::sys::{jboolean, jfloat, jint, jlong, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 use parking_lot::Mutex;
@@ -138,6 +138,47 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeAppl
     unsafe {
         with_engine(handle_ptr, |engine| {
             engine.apply_segment(x0, y0, x1, y1, config);
+        });
+    }
+}
+
+/// Rasteriza un lote de segmentos `[x0, y0, x1, y1, ...]` en una sola llamada JNI.
+#[no_mangle]
+pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeApplySegmentsBatch(
+    env: JNIEnv,
+    _class: JClass,
+    handle_ptr: jlong,
+    coords: JFloatArray,
+    float_count: jint,
+    brush_kind: jint,
+    argb_color: jint,
+    radius: jfloat,
+    opacity: jfloat,
+    hardness: jfloat,
+) {
+    let Ok(arr_len) = env.get_array_length(&coords) else {
+        return;
+    };
+    let count = (float_count.max(0) as usize).min(arr_len.max(0) as usize);
+    if count < 4 {
+        return;
+    }
+
+    let mut buf = vec![0.0_f32; count];
+    if env.get_float_array_region(&coords, 0, &mut buf).is_err() {
+        return;
+    }
+
+    let config = BrushConfig {
+        kind: BrushKind::from_i32(brush_kind),
+        color: RgbaColor::from_argb_int(argb_color),
+        radius,
+        opacity,
+        hardness,
+    };
+    unsafe {
+        with_engine(handle_ptr, |engine| {
+            engine.apply_segments_batch(&buf, config);
         });
     }
 }

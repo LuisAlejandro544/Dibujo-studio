@@ -25,6 +25,7 @@ data class CanvasUiState(
     val canvasHeight: Int = 1080,
     val bitmap: Bitmap? = null,
     val brush: BrushSettings = BrushSettings(),
+    val isPanMode: Boolean = false,
     val recentColors: List<Int> = listOf(
         0xFF1F2937.toInt(),
         0xFFEF4444.toInt(),
@@ -45,6 +46,7 @@ data class CanvasUiState(
 /**
  * ViewModel del lienzo que coordina todas las llamadas hacia `RustCanvasSession`
  * usando `viewModelScope` y corrutinas en segundo plano (sin bloquear el hilo UI).
+ * Agrupa segmentos pendientes en lotes para eliminar latencia durante trazos rápidos.
  */
 class CanvasViewModel : ViewModel() {
 
@@ -55,7 +57,29 @@ class CanvasViewModel : ViewModel() {
     private var lastX: Float = 0f
     private var lastY: Float = 0f
 
+    // Cola sincronizada para agrupar eventos táctiles de trazo en un único render por cuadro.
+    private val strokeQueueLock = Any()
+    private var pendingBeginTransaction = false
+    private var pendingHasDab = false
+    private var pendingDabX = 0f
+    private var pendingDabY = 0f
+    private val pendingSegmentCoords = ArrayList<Float>(128)
+    private var pendingBrush: BrushSettings? = null
+    private var pendingCancelUndo = false
+    private var pendingStatsRefresh = false
+    private var flushRunning = false
+    private var strokeStartedInGesture = false
+
     fun startNewSession(title: String, width: Int, height: Int) {
+        synchronized(strokeQueueLock) {
+            pendingBeginTransaction = false
+            pendingHasDab = false
+            pendingSegmentCoords.clear()
+            pendingBrush = null
+            pendingCancelUndo = false
+            pendingStatsRefresh = false
+            strokeStartedInGesture = false
+        }
         session?.close()
         val newSession = RustCanvasSession(width, height)
         session = newSession
@@ -66,6 +90,7 @@ class CanvasViewModel : ViewModel() {
                 canvasWidth = width,
                 canvasHeight = height,
                 bitmap = null,
+                isPanMode = false,
                 isBusy = true,
                 statusBanner = null
             )
@@ -90,7 +115,22 @@ class CanvasViewModel : ViewModel() {
 
     fun selectTool(tool: ToolType) {
         _uiState.update { state ->
-            state.copy(brush = state.brush.copy(tool = tool))
+            state.copy(
+                brush = state.brush.copy(tool = tool),
+                isPanMode = false
+            )
+        }
+    }
+
+    fun togglePanMode() {
+        _uiState.update { state ->
+            state.copy(isPanMode = !state.isPanMode)
+        }
+    }
+
+    fun setPanMode(enabled: Boolean) {
+        _uiState.update { state ->
+            state.copy(isPanMode = enabled)
         }
     }
 
@@ -124,13 +164,15 @@ class CanvasViewModel : ViewModel() {
 
     fun onCanvasTouchDown(canvasX: Float, canvasY: Float) {
         val activeSession = session ?: return
+        if (_uiState.value.isPanMode) return
         val currentBrush = _uiState.value.brush
         lastX = canvasX
         lastY = canvasY
 
-        viewModelScope.launch {
-            when (currentBrush.tool) {
-                ToolType.EYEDROPPER -> {
+        when (currentBrush.tool) {
+            ToolType.EYEDROPPER -> {
+                strokeStartedInGesture = false
+                viewModelScope.launch {
                     val picked = activeSession.pickColor(canvasX.toInt(), canvasY.toInt())
                     updateColor(picked)
                     _uiState.update {
@@ -140,7 +182,10 @@ class CanvasViewModel : ViewModel() {
                         )
                     }
                 }
-                ToolType.BUCKET -> {
+            }
+            ToolType.BUCKET -> {
+                strokeStartedInGesture = true
+                viewModelScope.launch {
                     val (changed, bmp) = activeSession.floodFill(
                         canvasX.toInt(),
                         canvasY.toInt(),
@@ -150,20 +195,29 @@ class CanvasViewModel : ViewModel() {
                     if (changed) {
                         val stats = activeSession.getStats()
                         _uiState.update { it.copy(bitmap = bmp, stats = stats) }
+                    } else {
+                        strokeStartedInGesture = false
                     }
                 }
-                else -> {
-                    activeSession.beginStroke()
-                    val bmp = activeSession.drawDab(canvasX, canvasY, currentBrush)
-                    val stats = activeSession.getStats()
-                    _uiState.update { it.copy(bitmap = bmp, stats = stats) }
+            }
+            else -> {
+                strokeStartedInGesture = true
+                synchronized(strokeQueueLock) {
+                    pendingBeginTransaction = true
+                    pendingHasDab = true
+                    pendingDabX = canvasX
+                    pendingDabY = canvasY
+                    pendingBrush = currentBrush
+                    pendingCancelUndo = false
                 }
+                scheduleStrokeFlush(activeSession)
             }
         }
     }
 
     fun onCanvasTouchMove(canvasX: Float, canvasY: Float) {
         val activeSession = session ?: return
+        if (_uiState.value.isPanMode) return
         val currentBrush = _uiState.value.brush
         if (!currentBrush.tool.isStrokeTool) return
 
@@ -172,17 +226,122 @@ class CanvasViewModel : ViewModel() {
         lastX = canvasX
         lastY = canvasY
 
-        viewModelScope.launch {
-            val bmp = activeSession.drawSegment(x0, y0, canvasX, canvasY, currentBrush)
-            _uiState.update { it.copy(bitmap = bmp) }
+        synchronized(strokeQueueLock) {
+            pendingSegmentCoords.add(x0)
+            pendingSegmentCoords.add(y0)
+            pendingSegmentCoords.add(canvasX)
+            pendingSegmentCoords.add(canvasY)
+            pendingBrush = currentBrush
         }
+        scheduleStrokeFlush(activeSession)
     }
 
     fun onCanvasTouchUp() {
         val activeSession = session ?: return
+        strokeStartedInGesture = false
+        synchronized(strokeQueueLock) {
+            pendingStatsRefresh = true
+        }
+        scheduleStrokeFlush(activeSession)
+    }
+
+    /**
+     * Si el usuario apoya un segundo dedo inmediatamente tras tocar con el primero para hacer zoom/pan,
+     * revierte el punto accidental creado al inicio del gesto.
+     */
+    fun cancelAccidentalTwoFingerStroke() {
+        val activeSession = session ?: return
+        if (!strokeStartedInGesture) return
+        strokeStartedInGesture = false
+
+        synchronized(strokeQueueLock) {
+            if (pendingBeginTransaction && pendingHasDab) {
+                pendingBeginTransaction = false
+                pendingHasDab = false
+                pendingSegmentCoords.clear()
+                pendingStatsRefresh = true
+            } else {
+                pendingSegmentCoords.clear()
+                pendingCancelUndo = true
+                pendingStatsRefresh = true
+            }
+        }
+        scheduleStrokeFlush(activeSession)
+    }
+
+    private fun scheduleStrokeFlush(activeSession: RustCanvasSession) {
+        synchronized(strokeQueueLock) {
+            if (flushRunning) return
+            flushRunning = true
+        }
+
         viewModelScope.launch {
-            val stats = activeSession.getStats()
-            _uiState.update { it.copy(stats = stats) }
+            while (true) {
+                var beginTx = false
+                var hasDab = false
+                var dabX = 0f
+                var dabY = 0f
+                var coords = FloatArray(0)
+                var brush: BrushSettings? = null
+                var doCancelUndo = false
+                var doStatsRefresh = false
+
+                synchronized(strokeQueueLock) {
+                    val hasDrawWork = pendingBeginTransaction || pendingHasDab || pendingSegmentCoords.isNotEmpty()
+                    if (!hasDrawWork && !pendingCancelUndo && !pendingStatsRefresh) {
+                        flushRunning = false
+                        return@launch
+                    }
+                    beginTx = pendingBeginTransaction
+                    hasDab = pendingHasDab
+                    dabX = pendingDabX
+                    dabY = pendingDabY
+                    if (pendingSegmentCoords.isNotEmpty()) {
+                        coords = pendingSegmentCoords.toFloatArray()
+                        pendingSegmentCoords.clear()
+                    }
+                    brush = pendingBrush
+                    doCancelUndo = pendingCancelUndo
+                    doStatsRefresh = pendingStatsRefresh
+                    pendingBeginTransaction = false
+                    pendingHasDab = false
+                    pendingCancelUndo = false
+                    pendingStatsRefresh = false
+                }
+
+                if (beginTx || hasDab || coords.isNotEmpty()) {
+                    val targetBrush = brush ?: _uiState.value.brush
+                    val bmp = activeSession.drawStrokeBatch(
+                        beginTransaction = beginTx,
+                        hasDab = hasDab,
+                        dabX = dabX,
+                        dabY = dabY,
+                        segmentCoords = coords,
+                        floatCount = coords.size,
+                        brush = targetBrush
+                    )
+                    _uiState.update { state ->
+                        state.copy(
+                            bitmap = bmp,
+                            stats = if (beginTx) state.stats.copy(canUndo = true) else state.stats
+                        )
+                    }
+                }
+
+                if (doCancelUndo) {
+                    val (ok, bmp) = activeSession.undo()
+                    if (ok) {
+                        val stats = activeSession.getStats()
+                        _uiState.update { it.copy(bitmap = bmp, stats = stats) }
+                        doStatsRefresh = false
+                    }
+                }
+
+                if (doStatsRefresh) {
+                    val stats = activeSession.getStats()
+                    _uiState.update { it.copy(stats = stats) }
+                }
+            }
         }
     }
 

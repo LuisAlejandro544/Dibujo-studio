@@ -40,6 +40,17 @@ internal object NativeEngineBridge {
         hardness: Float
     )
 
+    external fun nativeApplySegmentsBatch(
+        handlePtr: Long,
+        coords: FloatArray,
+        floatCount: Int,
+        brushKind: Int,
+        argbColor: Int,
+        radius: Float,
+        opacity: Float,
+        hardness: Float
+    )
+
     external fun nativeFloodFill(
         handlePtr: Long,
         x: Int,

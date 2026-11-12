@@ -19,7 +19,7 @@ Reglas estrictas para cualquier agente o colaborador que modifique este reposito
   - Debe activarse **solo manualmente** (`workflow_dispatch`).
   - Debe correr **sin caché**.
   - Debe usar `sdkmanager` directamente (sin `android-actions/setup-android@v3` por su fallo con el paquete legado `tools`).
-  - Debe generar el APK Debug tras compilar los 4 targets de Rust y Kotlin.
+  - Debe generar el APK Debug tras compilar Rust y Kotlin, permitiendo elegir entre compilación `universal` (4 targets 32/64-bit) o `arm64-v8a` (solo 64-bit).
 
 ## 4. Archivo `commit_message.txt`
 - Si llegara a existir un archivo `commit_message.txt`, su contenido debe estar en **español** y no debe alterarse salvo petición explícita del usuario.

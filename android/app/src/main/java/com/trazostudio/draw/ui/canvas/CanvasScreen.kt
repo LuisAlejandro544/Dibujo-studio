@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FormatColorFill
 import androidx.compose.material.icons.rounded.Layers
+import androidx.compose.material.icons.rounded.PanTool
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
@@ -62,15 +64,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageShader
+import androidx.compose.ui.graphics.ShaderBrush
+import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -87,6 +92,7 @@ import com.trazostudio.draw.ui.canvas.popups.BrushSettingsPopup
 import com.trazostudio.draw.ui.canvas.popups.ColorPickerPopup
 import com.trazostudio.draw.ui.canvas.popups.LayersPopup
 import com.trazostudio.engine.ToolType
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -118,6 +124,30 @@ fun CanvasScreen(
     // Estado de zoom y desplazamiento de la vista del lienzo
     var zoom by remember { mutableFloatStateOf(1f) }
     var panOffset by remember { mutableStateOf(Offset.Zero) }
+    val currentIsPanMode by rememberUpdatedState(state.isPanMode)
+    val currentTwoFingerPanZoom by rememberUpdatedState(preferences.twoFingerPanZoom)
+
+    // Patrón de cuadrícula reutilizable en un solo drawRect (evita miles de llamadas por cuadro).
+    val checkerBrush = remember {
+        val cell = 24
+        val tile = cell * 2
+        val pixels = IntArray(tile * tile)
+        val cLight = 0xFFE5E7EB.toInt()
+        val cDark = 0xFFD1D5DB.toInt()
+        for (y in 0 until tile) {
+            for (x in 0 until tile) {
+                val isLight = ((x / cell) + (y / cell)) % 2 == 0
+                pixels[y * tile + x] = if (isLight) cLight else cDark
+            }
+        }
+        val tileBmp = android.graphics.Bitmap.createBitmap(
+            pixels,
+            tile,
+            tile,
+            android.graphics.Bitmap.Config.ARGB_8888
+        )
+        ShaderBrush(ImageShader(tileBmp.asImageBitmap(), TileMode.Repeated, TileMode.Repeated))
+    }
 
     LaunchedEffect(state.statusBanner) {
         val banner = state.statusBanner
@@ -128,11 +158,16 @@ fun CanvasScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0),
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
+                windowInsets = WindowInsets(0),
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(
+                        onClick = onNavigateBack,
+                        modifier = Modifier.size(40.dp)
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                             contentDescription = "Volver a galería"
@@ -149,37 +184,59 @@ fun CanvasScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "${state.canvasWidth}×${state.canvasHeight} • Capa ${state.stats.activeLayerIndex + 1}/${state.stats.layerCount}",
+                            text = if (state.isPanMode) {
+                                "Modo mover • ${state.canvasWidth}×${state.canvasHeight}"
+                            } else {
+                                "${state.canvasWidth}×${state.canvasHeight} • C${state.stats.activeLayerIndex + 1}/${state.stats.layerCount}"
+                            },
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (state.isPanMode) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 },
                 actions = {
                     IconButton(
                         onClick = { viewModel.undo() },
-                        enabled = state.stats.canUndo
+                        enabled = state.stats.canUndo,
+                        modifier = Modifier.size(38.dp)
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.Undo, contentDescription = "Deshacer")
                     }
                     IconButton(
                         onClick = { viewModel.redo() },
-                        enabled = state.stats.canRedo
+                        enabled = state.stats.canRedo,
+                        modifier = Modifier.size(38.dp)
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.Redo, contentDescription = "Rehacer")
                     }
-                    IconButton(onClick = { showLayersPopup = true }) {
+                    IconButton(
+                        onClick = { showLayersPopup = true },
+                        modifier = Modifier.size(38.dp)
+                    ) {
                         Icon(Icons.Rounded.Layers, contentDescription = "Capas")
                     }
-                    IconButton(onClick = { showClearConfirm = true }) {
+                    IconButton(
+                        onClick = { showClearConfirm = true },
+                        modifier = Modifier.size(38.dp)
+                    ) {
                         Icon(Icons.Rounded.DeleteSweep, contentDescription = "Limpiar capa")
                     }
                     IconButton(
-                        onClick = { viewModel.saveToInternalGallery(context) {} }
+                        onClick = { viewModel.saveToInternalGallery(context) {} },
+                        modifier = Modifier.size(38.dp)
                     ) {
                         Icon(Icons.Rounded.Save, contentDescription = "Guardar proyecto")
                     }
-                    IconButton(onClick = onNavigateToExport) {
+                    IconButton(
+                        onClick = onNavigateToExport,
+                        modifier = Modifier.size(38.dp)
+                    ) {
                         Icon(Icons.Rounded.FileDownload, contentDescription = "Exportar obra")
                     }
                 },
@@ -191,10 +248,12 @@ fun CanvasScreen(
         bottomBar = {
             StudioBottomDock(
                 activeTool = state.brush.tool,
+                isPanMode = state.isPanMode,
                 activeColorArgb = state.brush.argbColor,
                 brushRadius = state.brush.radiusPx,
                 zoomPercent = (zoom * 100).roundToInt(),
                 onSelectTool = { viewModel.selectTool(it) },
+                onTogglePanMode = { viewModel.togglePanMode() },
                 onOpenColorPicker = { showColorPopup = true },
                 onOpenBrushSettings = { showBrushPopup = true },
                 onResetViewport = {
@@ -245,13 +304,32 @@ fun CanvasScreen(
                         .pointerInput(
                             viewportW,
                             viewportH,
-                            fitScale,
-                            preferences.twoFingerPanZoom
+                            fitScale
                         ) {
                             awaitEachGesture {
                                 val firstDown = awaitFirstDown(requireUnconsumed = false)
+                                val panOnlyMode = currentIsPanMode
+
+                                if (panOnlyMode) {
+                                    // Modo Mover libre: 1 dedo desplaza y 2 dedos hacen zoom + desplazamiento sin pintar.
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val pressedCount = event.changes.count { it.pressed }
+                                        if (pressedCount == 0) break
+                                        val zoomDelta = event.calculateZoom()
+                                        val panDelta = event.calculatePan()
+                                        zoom = (zoom * zoomDelta).coerceIn(0.4f, 6f)
+                                        panOffset += panDelta
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                    return@awaitEachGesture
+                                }
+
                                 var isTransforming = false
                                 var activeStroke = false
+                                val downTimeMs = System.currentTimeMillis()
+                                val firstDownPos = firstDown.position
+                                var maxTravelPx = 0f
 
                                 fun screenToCanvas(pos: Offset): Offset {
                                     val totalScale = fitScale * zoom
@@ -288,7 +366,13 @@ fun CanvasScreen(
                                         break
                                     }
 
-                                    if (pressedCount >= 2 && preferences.twoFingerPanZoom) {
+                                    if (pressedCount >= 2 && currentTwoFingerPanZoom) {
+                                        if (!isTransforming && activeStroke) {
+                                            val elapsed = System.currentTimeMillis() - downTimeMs
+                                            if (elapsed < 220L && maxTravelPx < 16f) {
+                                                viewModel.cancelAccidentalTwoFingerStroke()
+                                            }
+                                        }
                                         isTransforming = true
                                         activeStroke = false
                                         val zoomDelta = event.calculateZoom()
@@ -298,6 +382,10 @@ fun CanvasScreen(
                                         event.changes.forEach { it.consume() }
                                     } else if (!isTransforming && pressedCount == 1) {
                                         val change = event.changes.first()
+                                        maxTravelPx = max(
+                                            maxTravelPx,
+                                            (change.position - firstDownPos).getDistance()
+                                        )
                                         if (change.positionChanged()) {
                                             val pt = screenToCanvas(change.position)
                                             if (activeStroke) {
@@ -328,21 +416,9 @@ fun CanvasScreen(
                                 translationY = panOffset.y
                             }
                     ) {
-                        // Fondo cuadriculado sutil para visualizar transparencia de capas
+                        // Fondo cuadriculado optimizado en una única llamada de dibujo.
                         if (preferences.showGridCheckers) {
-                            val cell = 24f
-                            val cols = (size.width / cell).toInt() + 1
-                            val rows = (size.height / cell).toInt() + 1
-                            for (r in 0 until rows) {
-                                for (c in 0 until cols) {
-                                    val light = (r + c) % 2 == 0
-                                    drawRect(
-                                        color = if (light) Color(0xFFE5E7EB) else Color(0xFFD1D5DB),
-                                        topLeft = Offset(c * cell, r * cell),
-                                        size = Size(cell, cell)
-                                    )
-                                }
-                            }
+                            drawRect(brush = checkerBrush)
                         }
 
                         drawImage(
@@ -422,10 +498,12 @@ private data class ToolDockEntry(
 @Composable
 private fun StudioBottomDock(
     activeTool: ToolType,
+    isPanMode: Boolean,
     activeColorArgb: Int,
     brushRadius: Float,
     zoomPercent: Int,
     onSelectTool: (ToolType) -> Unit,
+    onTogglePanMode: () -> Unit,
     onOpenColorPicker: () -> Unit,
     onOpenBrushSettings: () -> Unit,
     onResetViewport: () -> Unit
@@ -492,8 +570,55 @@ private fun StudioBottomDock(
                     }
                 }
 
+                // Botón para alternar entre mover libremente el lienzo y dibujar
+                Surface(
+                    onClick = onTogglePanMode,
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isPanMode) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                    modifier = if (isPanMode) {
+                        Modifier.border(
+                            1.5.dp,
+                            MaterialTheme.colorScheme.primary,
+                            RoundedCornerShape(12.dp)
+                        )
+                    } else {
+                        Modifier
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PanTool,
+                            contentDescription = if (isPanMode) "Volver a dibujar" else "Mover lienzo",
+                            tint = if (isPanMode) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = if (isPanMode) "Dibujar" else "Mover",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (isPanMode) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isPanMode) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            }
+                        )
+                    }
+                }
+
                 tools.forEach { entry ->
-                    val selected = entry.tool == activeTool
+                    val selected = !isPanMode && entry.tool == activeTool
                     Surface(
                         onClick = { onSelectTool(entry.tool) },
                         shape = RoundedCornerShape(12.dp),

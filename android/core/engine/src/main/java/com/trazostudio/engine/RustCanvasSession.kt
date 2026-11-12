@@ -25,6 +25,11 @@ class RustCanvasSession(
     private val engineDispatcher = Dispatchers.Default.limitedParallelism(1)
     private var nativeHandle: Long = 0L
     private val pixelBuffer: ByteBuffer = ByteBuffer.allocateDirect(width * height * 4)
+    // Doble búfer reutilizable para evitar crear un Bitmap nuevo en cada movimiento del dedo.
+    private val renderBitmaps: Array<Bitmap> = Array(2) {
+        Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    }
+    private var nextBitmapSlot: Int = 0
     private var closed = false
 
     suspend fun initialize(): Bitmap = withContext(engineDispatcher) {
@@ -77,6 +82,51 @@ class RustCanvasSession(
                 opacity = brush.opacity,
                 hardness = brush.hardness
             )
+        }
+        renderBitmapInternal()
+    }
+
+    /**
+     * Ejecuta en un único paso por el hilo nativo el inicio de trazo, el punto inicial (opcional)
+     * y todos los segmentos acumulados antes de transferir la imagen compuesta una sola vez.
+     */
+    suspend fun drawStrokeBatch(
+        beginTransaction: Boolean,
+        hasDab: Boolean,
+        dabX: Float,
+        dabY: Float,
+        segmentCoords: FloatArray,
+        floatCount: Int,
+        brush: BrushSettings
+    ): Bitmap = withContext(engineDispatcher) {
+        if (nativeHandle != 0L && brush.tool.isStrokeTool) {
+            if (beginTransaction) {
+                NativeEngineBridge.nativeBeginStroke(nativeHandle)
+            }
+            if (hasDab) {
+                NativeEngineBridge.nativeApplyDab(
+                    handlePtr = nativeHandle,
+                    x = dabX,
+                    y = dabY,
+                    brushKind = brush.tool.rustBrushId,
+                    argbColor = brush.argbColor,
+                    radius = brush.radiusPx,
+                    opacity = brush.opacity,
+                    hardness = brush.hardness
+                )
+            }
+            if (floatCount >= 4) {
+                NativeEngineBridge.nativeApplySegmentsBatch(
+                    handlePtr = nativeHandle,
+                    coords = segmentCoords,
+                    floatCount = floatCount,
+                    brushKind = brush.tool.rustBrushId,
+                    argbColor = brush.argbColor,
+                    radius = brush.radiusPx,
+                    opacity = brush.opacity,
+                    hardness = brush.hardness
+                )
+            }
         }
         renderBitmapInternal()
     }
@@ -200,7 +250,8 @@ class RustCanvasSession(
     }
 
     private fun renderBitmapInternal(): Bitmap {
-        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val bmp = renderBitmaps[nextBitmapSlot]
+        nextBitmapSlot = 1 - nextBitmapSlot
         if (nativeHandle != 0L) {
             pixelBuffer.rewind()
             val ok = NativeEngineBridge.nativeRenderToDirectBuffer(nativeHandle, pixelBuffer)

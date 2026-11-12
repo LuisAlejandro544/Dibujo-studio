@@ -13,27 +13,45 @@ plugins {
 val rustCrateDir = rootProject.file("rust/drawing_engine")
 val jniLibsOutputDir = layout.projectDirectory.dir("src/main/jniLibs").asFile
 
-// Tarea obligatoria de Gradle: compila el motor Rust para arquitecturas de 32 bits (armeabi-v7a, x86)
-// y 64 bits (arm64-v8a, x86_64) antes de empaquetar cualquier APK o AAR.
+// Modo de arquitectura configurable desde Gradle/CI:
+// - "universal" (predeterminado): compila las 4 ABIs (armeabi-v7a, arm64-v8a, x86, x86_64).
+// - "arm64-v8a": compila únicamente la arquitectura móvil de 64 bits (más rápido y liviano).
+val abiMode = providers.gradleProperty("trazoAbiMode").getOrElse("universal")
+val selectedAbis = if (abiMode == "arm64-v8a") {
+    listOf("arm64-v8a")
+} else {
+    listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+}
+
+// Tarea obligatoria de Gradle: compila el motor Rust con cargo-ndk para las ABIs seleccionadas
+// antes de empaquetar cualquier APK o AAR.
 val buildRustNativeLibs by tasks.registering(Exec::class) {
     group = "rust"
-    description = "Compila libtrazo_engine.so con cargo-ndk para 32-bit y 64-bit."
+    description = "Compila libtrazo_engine.so con cargo-ndk según trazoAbiMode ($abiMode)."
 
     workingDir = rustCrateDir
+    inputs.property("trazoAbiMode", abiMode)
     inputs.dir(rustCrateDir.resolve("src"))
     inputs.file(rustCrateDir.resolve("Cargo.toml"))
     outputs.dir(jniLibsOutputDir)
 
-    commandLine(
-        "cargo", "ndk",
-        "-t", "armeabi-v7a",
-        "-t", "arm64-v8a",
-        "-t", "x86",
-        "-t", "x86_64",
+    doFirst {
+        // Limpia librerías nativas previas para evitar mezclar ABIs al cambiar de modo.
+        if (jniLibsOutputDir.exists()) {
+            jniLibsOutputDir.deleteRecursively()
+        }
+    }
+
+    val cargoArgs = mutableListOf("cargo", "ndk")
+    selectedAbis.forEach { abi ->
+        cargoArgs += listOf("-t", abi)
+    }
+    cargoArgs += listOf(
         "--platform", "26",
         "-o", jniLibsOutputDir.absolutePath,
         "build", "--release"
     )
+    commandLine(cargoArgs)
 }
 
 android {
@@ -45,8 +63,8 @@ android {
         consumerProguardFiles("consumer-rules.pro")
 
         ndk {
-            // Soporte explícito para dispositivos de 32 bits y 64 bits (ARM y x86 para emuladores/tablets).
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            // Incluye las 4 ABIs en modo universal o únicamente arm64-v8a en modo 64 bits.
+            abiFilters += selectedAbis
         }
     }
 

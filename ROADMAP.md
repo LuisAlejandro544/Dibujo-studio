@@ -8,8 +8,8 @@ Plan de evolución por fases para el estudio de dibujo **Kotlin + Rust**.
 - [x] Relleno por inundación iterativo (*scanline flood fill*) y Cuentagotas.
 - [x] Composición multicapa (hasta 12 capas), opacidad, visibilidad y combinar hacia abajo.
 - [x] Pila Undo/Redo (hasta 25 pasos) y codificación PNG en Rust.
-- [x] Interfaz Jetpack Compose + Material 3 + Material Icons con 4 pantallas dedicadas y popups.
-- [x] Flujo manual en GitHub Actions para compilar el APK Debug sin PC y sin caché.
+- [x] Interfaz Jetpack Compose + Material 3 + Material Icons con 4 pantallas dedicadas, modo inmersivo y botón Mover/Dibujar.
+- [x] Flujo manual en GitHub Actions sin caché para compilar APK Debug eligiendo `universal` (32/64-bit) o `arm64-v8a` (solo 64-bit).
 
 ## Fase 2 — Precisión de trazo y herramientas artísticas
 - [ ] Estabilizador de trazo en tiempo real en Rust (suavizado por promedio móvil / cuerda tensa).
@@ -23,6 +23,6 @@ Plan de evolución por fases para el estudio de dibujo **Kotlin + Rust**.
 - [ ] Transformación de capa (mover, escalar, rotar) ejecutada en memoria nativa.
 
 ## Fase 4 — Optimización y publicación (Uptodown / APK directo)
-- [ ] Renderizado parcial por regiones sucias (*dirty rects*) en `composited_buffer` para lienzos 2K/4K a 60+ FPS.
+- [x] Renderizado parcial por regiones sucias (*dirty rects*) en `composited_buffer`, lotes JNI y doble búfer de `Bitmap` para trazos fluidos.
 - [ ] Firma keystore para publicación de APK Release en Uptodown y canales de terceros.
 - [ ] Pruebas instrumentadas de JNI en emuladores ARM64 y x86.

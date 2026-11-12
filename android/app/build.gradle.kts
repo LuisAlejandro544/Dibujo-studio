@@ -11,6 +11,14 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Modo de arquitectura configurable desde Gradle/CI ("universal" o "arm64-v8a").
+val abiMode = providers.gradleProperty("trazoAbiMode").getOrElse("universal")
+val selectedAbis = if (abiMode == "arm64-v8a") {
+    listOf("arm64-v8a")
+} else {
+    listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+}
+
 android {
     namespace = "com.trazostudio.draw"
     compileSdk = 35
@@ -23,7 +31,7 @@ android {
         versionName = "0.1.0"
 
         ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            abiFilters += selectedAbis
         }
     }
 
