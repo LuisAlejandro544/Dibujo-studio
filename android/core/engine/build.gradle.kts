@@ -30,7 +30,7 @@ val buildRustNativeLibs by tasks.registering(Exec::class) {
         "-t", "arm64-v8a",
         "-t", "x86",
         "-t", "x86_64",
-        "-p", "26",
+        "--platform", "26",
         "-o", jniLibsOutputDir.absolutePath,
         "build", "--release"
     )
