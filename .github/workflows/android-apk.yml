@@ -1,10 +1,15 @@
 # Flujo de GitHub Actions exclusivamente manual para compilar el APK Debug de TrazoStudio.
 #
-# Características solicitadas:
-# - Activación 100% manual (`workflow_dispatch`): NO se ejecuta en commits, pull requests ni issues.
-# - Sin caché (`cache-disabled: true`, `--no-build-cache`, sin `actions/cache`).
-# - Descarga todo el código del repositorio (`fetch-depth: 0`), descarga e instala herramientas del sistema,
-#   Android SDK/Build-Tools/NDK, Rust con targets de 32 y 64 bits, dependencias de Cargo y compila el APK Debug.
+# Solución al error de `android-actions/setup-android@v3` ("Failed to find package 'tools'"):
+# Se reemplaza `setup-android@v3` por la invocación directa de `sdkmanager` (ya disponible en
+# /usr/local/lib/android/sdk/cmdline-tools/*/bin/sdkmanager o descargando cmdline-tools si faltase),
+# evitando que intente instalar el paquete legado y eliminado `tools`.
+#
+# Reglas del flujo:
+# - Activación 100% manual (`workflow_dispatch`): NO se activa en commits, pull requests ni issues.
+# - Sin caché (`cache-disabled: true`, `--no-build-cache`, `--no-daemon`, sin `actions/cache`).
+# - Descarga todo el código (`fetch-depth: 0`), instala Android SDK/NDK, Rust (32-bit y 64-bit),
+#   descarga y compila dependencias de Rust, ejecuta `cargo test` y compila el APK Debug en Kotlin.
 
 name: Compilar APK Debug (Manual)
 
@@ -12,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       verify_apk_contents:
-        description: "Inspeccionar librerías .so dentro del APK Debug generado"
+        description: "Inspeccionar librerías .so y classes.dex dentro del APK Debug"
         required: false
         default: true
         type: boolean
@@ -39,21 +44,42 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Configurar Android SDK y herramientas
-        uses: android-actions/setup-android@v3
-
-      - name: Instalar Android Platform 35, Build-Tools 35 y NDK r26d
+      - name: Configurar Android SDK, Platform 35, Build-Tools 35 y NDK r26d (sin paquete legado 'tools')
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager --install \
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          mkdir -p "$SDK_ROOT"
+
+          SDKMANAGER=""
+          if command -v sdkmanager >/dev/null 2>&1; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          else
+            SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort -V | tail -n 1 || true)"
+          fi
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "Descargando Android cmdline-tools..."
+            mkdir -p "$SDK_ROOT/cmdline-tools"
+            curl -fsSL -o /tmp/cmdline-tools.zip "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+            unzip -q /tmp/cmdline-tools.zip -d /tmp/cmdline-tools-extract
+            mv /tmp/cmdline-tools-extract/cmdline-tools "$SDK_ROOT/cmdline-tools/latest"
+            rm -rf /tmp/cmdline-tools.zip /tmp/cmdline-tools-extract
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          fi
+
+          echo "Usando sdkmanager: $SDKMANAGER"
+          { yes || true; } | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" --install \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0" \
             "ndk;26.3.11579264"
-          echo "ANDROID_HOME=${ANDROID_SDK_ROOT}" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/26.3.11579264" >> "$GITHUB_ENV"
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
+
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/26.3.11579264" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
 
       - name: Instalar Rust estable y targets Android (32-bit y 64-bit)
         uses: dtolnay/rust-toolchain@stable
@@ -64,7 +90,7 @@ jobs:
             i686-linux-android,
             x86_64-linux-android
 
-      - name: Instalar cargo-ndk para compilar .so de Android
+      - name: Instalar cargo-ndk para compilar librerías .so de Android
         run: cargo install cargo-ndk --locked
 
       - name: Descargar dependencias de Rust y ejecutar pruebas unitarias
