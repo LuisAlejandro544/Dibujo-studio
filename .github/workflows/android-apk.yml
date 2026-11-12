@@ -1,0 +1,102 @@
+# Flujo de GitHub Actions exclusivamente manual para compilar el APK Debug de TrazoStudio.
+#
+# Características solicitadas:
+# - Activación 100% manual (`workflow_dispatch`): NO se ejecuta en commits, pull requests ni issues.
+# - Sin caché (`cache-disabled: true`, `--no-build-cache`, sin `actions/cache`).
+# - Descarga todo el código del repositorio (`fetch-depth: 0`), descarga e instala herramientas del sistema,
+#   Android SDK/Build-Tools/NDK, Rust con targets de 32 y 64 bits, dependencias de Cargo y compila el APK Debug.
+
+name: Compilar APK Debug (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      verify_apk_contents:
+        description: "Inspeccionar librerías .so dentro del APK Debug generado"
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  build-debug-apk:
+    name: Compilar TrazoStudio Debug APK (Kotlin + Rust 32/64-bit)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar todo el código del proyecto
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Instalar utilidades base de compilación del sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl unzip clang lld build-essential pkg-config
+
+      - name: Configurar Java 17 (sin caché)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Configurar Android SDK y herramientas
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar Android Platform 35, Build-Tools 35 y NDK r26d
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;26.3.11579264"
+          echo "ANDROID_HOME=${ANDROID_SDK_ROOT}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/26.3.11579264" >> "$GITHUB_ENV"
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
+
+      - name: Instalar Rust estable y targets Android (32-bit y 64-bit)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: >
+            armv7-linux-androideabi,
+            aarch64-linux-android,
+            i686-linux-android,
+            x86_64-linux-android
+
+      - name: Instalar cargo-ndk para compilar .so de Android
+        run: cargo install cargo-ndk --locked
+
+      - name: Descargar dependencias de Rust y ejecutar pruebas unitarias
+        working-directory: android/rust/drawing_engine
+        run: |
+          cargo fetch
+          cargo test
+
+      - name: Configurar Gradle 8.9 (sin caché)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+          cache-disabled: true
+
+      - name: Compilar librerías Rust (32/64-bit) y código Kotlin en APK Debug
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-build-cache --no-daemon --stacktrace
+
+      - name: Verificar contenido del APK Debug generado
+        if: ${{ inputs.verify_apk_contents }}
+        run: |
+          APK_PATH=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          echo "APK generado en: $APK_PATH"
+          ls -lh "$APK_PATH"
+          unzip -l "$APK_PATH" | grep -E "libtrazo_engine\.so|classes.*\.dex"
+
+      - name: Subir APK Debug como artefacto descargable
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrazoStudio-Debug-APK
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14

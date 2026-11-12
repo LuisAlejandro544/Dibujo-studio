@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Rutas permitidas por FileProvider para compartir archivos PNG exportados desde Rust. -->
+<paths>
+    <cache-path name="shared_exports" path="exports/" />
+    <files-path name="saved_projects" path="projects/" />
+</paths>

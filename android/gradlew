@@ -1,0 +1,20 @@
+#!/usr/bin/env sh
+# Script ejecutable estándar de Gradle Wrapper para compilar el APK incluyendo Rust.
+# Uso: ./gradlew assembleRelease (o assembleDebug)
+
+set -eu
+
+APP_HOME=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+if command -v gradle >/dev/null 2>&1; then
+    exec gradle --project-dir "$APP_HOME" "$@"
+fi
+
+WRAPPER_JAR="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+if [ ! -f "$WRAPPER_JAR" ]; then
+    echo "Descargando gradle-wrapper.jar..."
+    mkdir -p "$APP_HOME/gradle/wrapper"
+    curl -fsSL -o "$WRAPPER_JAR" "https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradle/wrapper/gradle-wrapper.jar"
+fi
+
+exec java -Xmx256m -jar "$WRAPPER_JAR" "$@"

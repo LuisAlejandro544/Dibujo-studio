@@ -1,0 +1,6 @@
+{
+  "name": "TrazoStudio",
+  "description": "TrazoStudio - Hello World web shell with Kotlin and Rust Android drawing app.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

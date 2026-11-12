@@ -1,0 +1,27 @@
+# Configuración del motor nativo de dibujo en Rust para TrazoStudio.
+# Todas las dependencias elegidas usan licencias permisivas (Apache-2.0 / MIT / Zlib)
+# que no obligan a abrir el código fuente del proyecto ni a mostrar atribuciones en la UI.
+
+[package]
+name = "trazo_engine"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[lib]
+name = "trazo_engine"
+crate-type = ["cdylib"]
+
+[dependencies]
+jni = "0.21"
+png = "0.17"
+bytemuck = "1.19"
+log = "0.4"
+android_logger = "0.14"
+parking_lot = "0.12"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
