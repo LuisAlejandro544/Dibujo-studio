@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateRotation
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -38,10 +39,13 @@ import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FormatColorFill
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.PanTool
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -59,6 +63,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -71,12 +76,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageShader
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -91,10 +99,15 @@ import com.trazostudio.draw.data.StudioPreferences
 import com.trazostudio.draw.ui.canvas.popups.BrushSettingsPopup
 import com.trazostudio.draw.ui.canvas.popups.ColorPickerPopup
 import com.trazostudio.draw.ui.canvas.popups.LayersPopup
+import com.trazostudio.draw.ui.canvas.popups.TracingReferencePopup
+import com.trazostudio.draw.ui.theme.studioTopBarWindowInsets
 import com.trazostudio.engine.ToolType
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
  * Pantalla del Estudio de Dibujo.
@@ -119,11 +132,14 @@ fun CanvasScreen(
     var showBrushPopup by remember { mutableStateOf(false) }
     var showColorPopup by remember { mutableStateOf(false) }
     var showLayersPopup by remember { mutableStateOf(false) }
+    var showTracingPopup by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
 
-    // Estado de zoom y desplazamiento de la vista del lienzo
+    // Estado de zoom, rotación y desplazamiento de la vista del lienzo
     var zoom by remember { mutableFloatStateOf(1f) }
+    var rotationDegrees by remember { mutableFloatStateOf(0f) }
     var panOffset by remember { mutableStateOf(Offset.Zero) }
+    var currentCanvasToScreenScale by remember { mutableFloatStateOf(1f) }
     val currentIsPanMode by rememberUpdatedState(state.isPanMode)
     val currentTwoFingerPanZoom by rememberUpdatedState(preferences.twoFingerPanZoom)
 
@@ -162,7 +178,7 @@ fun CanvasScreen(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
-                windowInsets = WindowInsets(0),
+                windowInsets = studioTopBarWindowInsets(),
                 navigationIcon = {
                     IconButton(
                         onClick = onNavigateBack,
@@ -175,6 +191,8 @@ fun CanvasScreen(
                     }
                 },
                 title = {
+                    val displayAngle = ((rotationDegrees % 360f) + 360f) % 360f
+                    val roundedAngle = displayAngle.roundToInt() % 360
                     Column {
                         Text(
                             text = state.projectTitle,
@@ -185,7 +203,9 @@ fun CanvasScreen(
                         )
                         Text(
                             text = if (state.isPanMode) {
-                                "Modo mover • ${state.canvasWidth}×${state.canvasHeight}"
+                                "Modo mover • ${roundedAngle}°"
+                            } else if (roundedAngle != 0) {
+                                "${state.canvasWidth}×${state.canvasHeight} • ${roundedAngle}°"
                             } else {
                                 "${state.canvasWidth}×${state.canvasHeight} • C${state.stats.activeLayerIndex + 1}/${state.stats.layerCount}"
                             },
@@ -249,15 +269,21 @@ fun CanvasScreen(
             StudioBottomDock(
                 activeTool = state.brush.tool,
                 isPanMode = state.isPanMode,
+                hasTracingImage = state.tracing.bitmap != null,
+                isTracingVisible = state.tracing.visible,
                 activeColorArgb = state.brush.argbColor,
                 brushRadius = state.brush.radiusPx,
                 zoomPercent = (zoom * 100).roundToInt(),
+                rotationDegrees = rotationDegrees,
                 onSelectTool = { viewModel.selectTool(it) },
                 onTogglePanMode = { viewModel.togglePanMode() },
                 onOpenColorPicker = { showColorPopup = true },
                 onOpenBrushSettings = { showBrushPopup = true },
+                onOpenTracing = { showTracingPopup = true },
+                onToggleTracingVisibility = { viewModel.toggleTracingVisibility() },
                 onResetViewport = {
                     zoom = 1f
+                    rotationDegrees = 0f
                     panOffset = Offset.Zero
                 }
             )
@@ -280,6 +306,9 @@ fun CanvasScreen(
                 min((viewportW * 0.92f) / canvasW, (viewportH * 0.92f) / canvasH)
                     .coerceAtLeast(0.05f)
             }
+            SideEffect {
+                currentCanvasToScreenScale = fitScale * zoom
+            }
 
             val baseRenderW = canvasW * fitScale
             val baseRenderH = canvasH * fitScale
@@ -297,6 +326,9 @@ fun CanvasScreen(
                 }
             } else {
                 val imageBitmap = remember(bmp) { bmp.asImageBitmap() }
+                val tracingImageBitmap = remember(state.tracing.bitmap) {
+                    state.tracing.bitmap?.asImageBitmap()
+                }
 
                 Box(
                     modifier = Modifier
@@ -311,14 +343,16 @@ fun CanvasScreen(
                                 val panOnlyMode = currentIsPanMode
 
                                 if (panOnlyMode) {
-                                    // Modo Mover libre: 1 dedo desplaza y 2 dedos hacen zoom + desplazamiento sin pintar.
+                                    // Modo Mover libre: 1 dedo desplaza y 2 dedos hacen zoom, rotación y desplazamiento sin pintar.
                                     while (true) {
                                         val event = awaitPointerEvent()
                                         val pressedCount = event.changes.count { it.pressed }
                                         if (pressedCount == 0) break
                                         val zoomDelta = event.calculateZoom()
                                         val panDelta = event.calculatePan()
+                                        val rotDelta = if (pressedCount >= 2) event.calculateRotation() else 0f
                                         zoom = (zoom * zoomDelta).coerceIn(0.4f, 6f)
+                                        rotationDegrees = (rotationDegrees + rotDelta) % 360f
                                         panOffset += panDelta
                                         event.changes.forEach { it.consume() }
                                     }
@@ -335,11 +369,16 @@ fun CanvasScreen(
                                     val totalScale = fitScale * zoom
                                     val centerX = viewportW / 2f + panOffset.x
                                     val centerY = viewportH / 2f + panOffset.y
-                                    val left = centerX - (canvasW * totalScale) / 2f
-                                    val top = centerY - (canvasH * totalScale) / 2f
+                                    val dx = pos.x - centerX
+                                    val dy = pos.y - centerY
+                                    val rad = rotationDegrees.toDouble() * (PI / 180.0)
+                                    val cosA = cos(rad).toFloat()
+                                    val sinA = sin(rad).toFloat()
+                                    val unrotX = dx * cosA + dy * sinA
+                                    val unrotY = -dx * sinA + dy * cosA
                                     return Offset(
-                                        x = (pos.x - left) / totalScale,
-                                        y = (pos.y - top) / totalScale
+                                        x = canvasW / 2f + unrotX / totalScale,
+                                        y = canvasH / 2f + unrotY / totalScale
                                     )
                                 }
 
@@ -412,6 +451,7 @@ fun CanvasScreen(
                             .graphicsLayer {
                                 scaleX = zoom
                                 scaleY = zoom
+                                rotationZ = rotationDegrees
                                 translationX = panOffset.x
                                 translationY = panOffset.y
                             }
@@ -427,6 +467,96 @@ fun CanvasScreen(
                             dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
                             filterQuality = FilterQuality.Low
                         )
+
+                        // Imagen de calco desde galería: guía semitransparente encima del lienzo sin alterar capas Rust.
+                        if (tracingImageBitmap != null && state.tracing.visible) {
+                            clipRect {
+                                val refW = tracingImageBitmap.width.toFloat().coerceAtLeast(1f)
+                                val refH = tracingImageBitmap.height.toFloat().coerceAtLeast(1f)
+                                val baseFit = min(size.width / refW, size.height / refH)
+                                val drawW = (refW * baseFit * state.tracing.scale).roundToInt().coerceAtLeast(1)
+                                val drawH = (refH * baseFit * state.tracing.scale).roundToInt().coerceAtLeast(1)
+                                val centerX = size.width / 2f + state.tracing.offsetX * size.width
+                                val centerY = size.height / 2f + state.tracing.offsetY * size.height
+                                val left = (centerX - drawW / 2f).roundToInt()
+                                val top = (centerY - drawH / 2f).roundToInt()
+                                drawImage(
+                                    image = tracingImageBitmap,
+                                    dstOffset = IntOffset(left, top),
+                                    dstSize = IntSize(drawW, drawH),
+                                    alpha = state.tracing.opacity,
+                                    filterQuality = FilterQuality.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    // Indicador 1:1 directo sobre el lienzo mientras el usuario ajusta el pincel en la hoja inferior
+                    if (showBrushPopup && state.brush.tool.isStrokeTool) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val r = (state.brush.radiusPx * fitScale * zoom).coerceAtLeast(1.5f)
+                            val previewCenter = Offset(size.width / 2f, size.height * 0.24f)
+                            val baseColor = if (state.brush.tool == ToolType.ERASER) {
+                                Color(0xFFD1D5DB)
+                            } else {
+                                Color(state.brush.argbColor)
+                            }
+                            when (state.brush.tool) {
+                                ToolType.AIRBRUSH -> {
+                                    drawCircle(
+                                        brush = Brush.radialGradient(
+                                            0f to baseColor.copy(alpha = state.brush.opacity * 0.72f),
+                                            0.55f to baseColor.copy(alpha = state.brush.opacity * 0.25f),
+                                            1f to baseColor.copy(alpha = 0f),
+                                            center = previewCenter,
+                                            radius = r
+                                        ),
+                                        radius = r,
+                                        center = previewCenter
+                                    )
+                                }
+                                ToolType.MARKER -> {
+                                    drawCircle(
+                                        color = baseColor.copy(alpha = state.brush.opacity),
+                                        radius = r,
+                                        center = previewCenter
+                                    )
+                                }
+                                ToolType.ERASER -> {
+                                    drawCircle(
+                                        color = baseColor.copy(alpha = state.brush.opacity * 0.7f),
+                                        radius = r,
+                                        center = previewCenter
+                                    )
+                                }
+                                else -> {
+                                    val innerStop = (0.2f + 0.75f * state.brush.hardness).coerceIn(0.2f, 0.97f)
+                                    drawCircle(
+                                        brush = Brush.radialGradient(
+                                            0f to baseColor.copy(alpha = state.brush.opacity),
+                                            innerStop to baseColor.copy(alpha = state.brush.opacity),
+                                            1f to baseColor.copy(alpha = 0f),
+                                            center = previewCenter,
+                                            radius = r
+                                        ),
+                                        radius = r,
+                                        center = previewCenter
+                                    )
+                                }
+                            }
+                            drawCircle(
+                                color = Color.White.copy(alpha = 0.85f),
+                                radius = r + 1.dp.toPx(),
+                                center = previewCenter,
+                                style = Stroke(width = 1.dp.toPx())
+                            )
+                            drawCircle(
+                                color = Color.Black.copy(alpha = 0.55f),
+                                radius = r,
+                                center = previewCenter,
+                                style = Stroke(width = 1.dp.toPx())
+                            )
+                        }
                     }
                 }
             }
@@ -436,6 +566,7 @@ fun CanvasScreen(
     if (showBrushPopup) {
         BrushSettingsPopup(
             brush = state.brush,
+            canvasToScreenScale = currentCanvasToScreenScale,
             onUpdate = { r, o, h, tol ->
                 viewModel.updateBrushParameters(r, o, h, tol)
             },
@@ -463,6 +594,20 @@ fun CanvasScreen(
             onChangeOpacity = { idx, op -> viewModel.setLayerOpacity(idx, op) },
             onMergeDown = { viewModel.mergeLayerDown(it) },
             onDismiss = { showLayersPopup = false }
+        )
+    }
+
+    if (showTracingPopup) {
+        TracingReferencePopup(
+            tracing = state.tracing,
+            onPickImageUri = { uri -> viewModel.loadTracingImage(context, uri) },
+            onToggleVisibility = { visible -> viewModel.setTracingVisible(visible) },
+            onChangeScale = { scale -> viewModel.updateTracingScale(scale) },
+            onChangeOpacity = { opacity -> viewModel.updateTracingOpacity(opacity) },
+            onChangeOffset = { x, y -> viewModel.updateTracingOffset(x, y) },
+            onResetTransform = { viewModel.resetTracingTransform() },
+            onClearImage = { viewModel.clearTracingImage() },
+            onDismiss = { showTracingPopup = false }
         )
     }
 
@@ -499,13 +644,18 @@ private data class ToolDockEntry(
 private fun StudioBottomDock(
     activeTool: ToolType,
     isPanMode: Boolean,
+    hasTracingImage: Boolean,
+    isTracingVisible: Boolean,
     activeColorArgb: Int,
     brushRadius: Float,
     zoomPercent: Int,
+    rotationDegrees: Float,
     onSelectTool: (ToolType) -> Unit,
     onTogglePanMode: () -> Unit,
     onOpenColorPicker: () -> Unit,
     onOpenBrushSettings: () -> Unit,
+    onOpenTracing: () -> Unit,
+    onToggleTracingVisibility: () -> Unit,
     onResetViewport: () -> Unit
 ) {
     val tools = remember {
@@ -617,6 +767,78 @@ private fun StudioBottomDock(
                     }
                 }
 
+                // Botón para abrir la herramienta de calco con imagen de la galería
+                Surface(
+                    onClick = onOpenTracing,
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (hasTracingImage) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                    modifier = if (hasTracingImage) {
+                        Modifier.border(
+                            1.dp,
+                            MaterialTheme.colorScheme.secondary,
+                            RoundedCornerShape(12.dp)
+                        )
+                    } else {
+                        Modifier
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Image,
+                            contentDescription = "Calcar imagen",
+                            tint = if (hasTracingImage) {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "Calco",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (hasTracingImage) FontWeight.Bold else FontWeight.Medium,
+                            color = if (hasTracingImage) {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            }
+                        )
+                    }
+                }
+
+                // Acceso rápido para mostrar/ocultar el calco sin abrir el panel cuando hay una imagen cargada
+                if (hasTracingImage) {
+                    Surface(
+                        onClick = onToggleTracingVisibility,
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (isTracingVisible) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                                contentDescription = if (isTracingVisible) "Ocultar calco" else "Mostrar calco",
+                                tint = if (isTracingVisible) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+
                 tools.forEach { entry ->
                     val selected = !isPanMode && entry.tool == activeTool
                     Surface(
@@ -657,7 +879,8 @@ private fun StudioBottomDock(
                     }
                 }
 
-                // Botón rápido para restablecer zoom/pan
+                // Botón rápido para restablecer zoom, rotación y posición
+                val normalizedDeg = (((rotationDegrees % 360f) + 360f) % 360f).roundToInt() % 360
                 Surface(
                     onClick = onResetViewport,
                     shape = RoundedCornerShape(12.dp),
@@ -674,7 +897,7 @@ private fun StudioBottomDock(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "$zoomPercent%",
+                            text = if (normalizedDeg != 0) "$zoomPercent% · ${normalizedDeg}°" else "$zoomPercent%",
                             style = MaterialTheme.typography.labelMedium
                         )
                     }

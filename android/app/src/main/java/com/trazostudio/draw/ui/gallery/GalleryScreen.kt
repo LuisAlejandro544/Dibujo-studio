@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -74,6 +75,7 @@ import androidx.compose.ui.unit.dp
 import com.trazostudio.draw.data.ProjectStorage
 import com.trazostudio.draw.data.SavedDrawingItem
 import com.trazostudio.draw.data.StudioPreferences
+import com.trazostudio.draw.ui.theme.studioTopBarWindowInsets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -99,6 +101,7 @@ private data class CanvasTemplate(
 fun GalleryScreen(
     preferences: StudioPreferences,
     onOpenNewCanvas: (title: String, width: Int, height: Int) -> Unit,
+    onOpenSavedArtwork: (SavedDrawingItem) -> Unit,
     onOpenSettings: () -> Unit
 ) {
     val context = LocalContext.current
@@ -128,8 +131,10 @@ fun GalleryScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0),
         topBar = {
             TopAppBar(
+                windowInsets = studioTopBarWindowInsets(),
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
@@ -343,7 +348,7 @@ fun GalleryScreen(
                                 }
                             },
                             onOpenTemplate = {
-                                onOpenNewCanvas("${item.title} Nuevo", item.width, item.height)
+                                onOpenSavedArtwork(item)
                             }
                         )
                     }

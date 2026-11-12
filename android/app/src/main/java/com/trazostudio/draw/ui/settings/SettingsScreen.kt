@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -46,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import com.trazostudio.draw.data.StudioPreferences
 import com.trazostudio.draw.data.StudioPreferencesRepository
 import com.trazostudio.draw.data.StudioThemeMode
+import com.trazostudio.draw.ui.theme.studioTopBarWindowInsets
 import com.trazostudio.engine.RustCanvasSession
 import kotlinx.coroutines.launch
 
@@ -71,8 +73,10 @@ fun SettingsScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0),
         topBar = {
             TopAppBar(
+                windowInsets = studioTopBarWindowInsets(),
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(

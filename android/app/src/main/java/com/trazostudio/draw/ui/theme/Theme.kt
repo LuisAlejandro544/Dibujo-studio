@@ -1,10 +1,23 @@
 package com.trazostudio.draw.ui.theme
 
+import android.os.Build
+import android.view.WindowManager
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.trazostudio.draw.data.StudioThemeMode
 
 // Paleta 1: Estudio Grafito (Oscuro cálido para resaltar los colores del lienzo sin fatiga visual)
@@ -66,6 +79,51 @@ private val WarmPaperColors = lightColorScheme(
     onSurfaceVariant = Color(0xFF57534E),
     outline = Color(0xFFD6CFC2)
 )
+
+/**
+ * Calcula un margen superior seguro para las TopAppBar en modo inmersivo, evitando que la
+ * cámara perforada o una cápsula/isla dinámica tape el título o los botones superiores.
+ */
+@Composable
+fun studioTopBarWindowInsets(): WindowInsets {
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    val cutout = WindowInsets.displayCutout
+    val cutoutTopPx = cutout.getTop(density)
+    val extraPadPx = with(density) { 10.dp.roundToPx() }
+    val minIslandSafePx = with(density) { 38.dp.roundToPx() }
+    val safeTopPx = maxOf(cutoutTopPx + extraPadPx, minIslandSafePx)
+
+    return WindowInsets(
+        left = cutout.getLeft(density, layoutDirection),
+        top = safeTopPx,
+        right = cutout.getRight(density, layoutDirection),
+        bottom = 0
+    )
+}
+
+/**
+ * Mantiene el modo inmersivo dentro de la ventana Dialog de los ModalBottomSheet para evitar
+ * que reaparezcan la barra de estado y los botones de navegación sobre los controles.
+ */
+@Composable
+fun StudioImmersiveSheetWindowEffect() {
+    val view = LocalView.current
+    SideEffect {
+        val dialogWindow = (view.parent as? DialogWindowProvider)?.window ?: return@SideEffect
+        WindowCompat.setDecorFitsSystemWindows(dialogWindow, false)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            dialogWindow.attributes = dialogWindow.attributes.apply {
+                layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+        val controller = WindowCompat.getInsetsController(dialogWindow, dialogWindow.decorView)
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+    }
+}
 
 /**
  * Tema raíz de TrazoStudio que aplica la paleta seleccionada por el usuario.

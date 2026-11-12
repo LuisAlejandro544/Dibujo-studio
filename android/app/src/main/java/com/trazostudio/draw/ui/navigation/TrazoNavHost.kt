@@ -57,6 +57,10 @@ fun TrazoNavHost(
                     canvasViewModel.startNewSession(title, width, height)
                     navController.navigate(TrazoRoutes.canvasRoute(title, width, height))
                 },
+                onOpenSavedArtwork = { item ->
+                    canvasViewModel.openSavedDrawing(item)
+                    navController.navigate(TrazoRoutes.canvasRoute(item.title, item.width, item.height))
+                },
                 onOpenSettings = {
                     navController.navigate(TrazoRoutes.SETTINGS)
                 }
@@ -76,8 +80,12 @@ fun TrazoNavHost(
             val height = backStackEntry.arguments?.getInt("height") ?: preferences.defaultHeight
 
             val uiState by canvasViewModel.uiState.collectAsState()
-            if (uiState.projectTitle != title || uiState.canvasWidth != width || uiState.canvasHeight != height) {
-                if (uiState.bitmap == null) {
+            androidx.compose.runtime.LaunchedEffect(title, width, height) {
+                if (
+                    !uiState.isBusy &&
+                    uiState.bitmap == null &&
+                    (uiState.projectTitle != title || uiState.canvasWidth != width || uiState.canvasHeight != height)
+                ) {
                     canvasViewModel.startNewSession(title, width, height)
                 }
             }

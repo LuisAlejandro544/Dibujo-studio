@@ -67,19 +67,20 @@ Mapa detallado de carpetas y archivos del repositorio.
             └── java/com/trazostudio/draw/
                 ├── MainActivity.kt                  # Modo inmersivo fullscreen y carga DataStore
                 ├── data/
-                │   ├── ProjectStorage.kt              # Almacenamiento IO, MediaStore y Share
+                │   ├── ProjectStorage.kt              # Almacenamiento IO, MediaStore, Share y decodificación de calco
                 │   └── StudioPreferencesRepository.kt # Preferencias con DataStore
                 └── ui/
-                    ├── theme/Theme.kt                 # 3 paletas Material 3 del estudio
+                    ├── theme/Theme.kt                 # 3 paletas Material 3 e insets seguros (cámara/isla dinámica)
                     ├── navigation/TrazoNavHost.kt     # Rutas entre las 4 pantallas
                     ├── gallery/GalleryScreen.kt       # Inicio, plantillas y obras guardadas
                     ├── export/ExportScreen.kt         # Vista previa y exportación PNG
                     ├── settings/SettingsScreen.kt     # Ajustes y diagnóstico ABI Rust
                     └── canvas/
-                        ├── CanvasViewModel.kt         # Cola por lotes, modo Mover/Dibujar y capas
-                        ├── CanvasScreen.kt            # Estudio fullscreen, botón Mover y gestos
+                        ├── CanvasViewModel.kt         # Cola por lotes, modo Mover/Dibujar, calco y capas
+                        ├── CanvasScreen.kt            # Estudio fullscreen, botón Mover (pan/zoom/rotación), calco y gestos
                         └── popups/
                             ├── BrushSettingsPopup.kt  # Popup tamaño, opacidad y dureza
-                            ├── ColorPickerPopup.kt    # Popup selector HSV y muestras
-                            └── LayersPopup.kt         # Popup gestor de capas
+                            ├── ColorPickerPopup.kt    # Popup selector HSV y muestras (negro por defecto)
+                            ├── LayersPopup.kt         # Popup gestor de capas
+                            └── TracingReferencePopup.kt # Popup calco desde galería (tamaño, opacidad, posición y visibilidad)
 ```

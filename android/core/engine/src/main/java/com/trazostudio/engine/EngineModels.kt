@@ -20,7 +20,8 @@ enum class ToolType(val rustBrushId: Int, val labelEs: String) {
 /** Configuración actual del pincel enviada a cada llamada de rasterización en Rust. */
 data class BrushSettings(
     val tool: ToolType = ToolType.BRUSH,
-    val argbColor: Int = 0xFF1F2937.toInt(),
+    // Color inicial negro puro por ser el más habitual al empezar a dibujar.
+    val argbColor: Int = 0xFF000000.toInt(),
     val radiusPx: Float = 14f,
     val opacity: Float = 1f,
     val hardness: Float = 0.85f,

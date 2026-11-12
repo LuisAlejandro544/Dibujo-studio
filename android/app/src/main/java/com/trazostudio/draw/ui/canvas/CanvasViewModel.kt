@@ -2,9 +2,11 @@ package com.trazostudio.draw.ui.canvas
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.trazostudio.draw.data.ProjectStorage
+import com.trazostudio.draw.data.SavedDrawingItem
 import com.trazostudio.engine.BrushSettings
 import com.trazostudio.engine.CanvasStats
 import com.trazostudio.engine.LayerInfo
@@ -15,6 +17,21 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
+
+/**
+ * Estado de la imagen de referencia ("calco") cargada desde la galería del teléfono.
+ * Se muestra solo como guía visual sobre el lienzo y no forma parte del PNG exportado.
+ */
+data class TracingReferenceState(
+    val bitmap: Bitmap? = null,
+    val visible: Boolean = true,
+    val opacity: Float = 0.45f,
+    val scale: Float = 1f,
+    val offsetX: Float = 0f,
+    val offsetY: Float = 0f,
+    val isLoading: Boolean = false
+)
 
 /**
  * Estado observable del estudio de dibujo consumido por CanvasScreen y ExportScreen.
@@ -26,8 +43,9 @@ data class CanvasUiState(
     val bitmap: Bitmap? = null,
     val brush: BrushSettings = BrushSettings(),
     val isPanMode: Boolean = false,
+    val tracing: TracingReferenceState = TracingReferenceState(),
     val recentColors: List<Int> = listOf(
-        0xFF1F2937.toInt(),
+        0xFF000000.toInt(),
         0xFFEF4444.toInt(),
         0xFFF59E0B.toInt(),
         0xFF10B981.toInt(),
@@ -54,6 +72,7 @@ class CanvasViewModel : ViewModel() {
     val uiState: StateFlow<CanvasUiState> = _uiState.asStateFlow()
 
     private var session: RustCanvasSession? = null
+    private var currentSavedFile: File? = null
     private var lastX: Float = 0f
     private var lastY: Float = 0f
 
@@ -81,6 +100,7 @@ class CanvasViewModel : ViewModel() {
             strokeStartedInGesture = false
         }
         session?.close()
+        currentSavedFile = null
         val newSession = RustCanvasSession(width, height)
         session = newSession
 
@@ -91,6 +111,7 @@ class CanvasViewModel : ViewModel() {
                 canvasHeight = height,
                 bitmap = null,
                 isPanMode = false,
+                tracing = TracingReferenceState(),
                 isBusy = true,
                 statusBanner = null
             )
@@ -108,6 +129,65 @@ class CanvasViewModel : ViewModel() {
                     stats = stats,
                     archInfo = arch,
                     isBusy = false
+                )
+            }
+        }
+    }
+
+    /**
+     * Abre una obra guardada previamente desde el disco y la decodifica en Rust
+     * para continuar dibujando sobre el mismo contenido sin perder trazos.
+     */
+    fun openSavedDrawing(item: SavedDrawingItem) {
+        synchronized(strokeQueueLock) {
+            pendingBeginTransaction = false
+            pendingHasDab = false
+            pendingSegmentCoords.clear()
+            pendingBrush = null
+            pendingCancelUndo = false
+            pendingStatsRefresh = false
+            strokeStartedInGesture = false
+        }
+        session?.close()
+        currentSavedFile = item.previewFile
+        val newSession = RustCanvasSession(item.width, item.height)
+        session = newSession
+
+        _uiState.update {
+            it.copy(
+                projectTitle = item.title,
+                canvasWidth = item.width,
+                canvasHeight = item.height,
+                bitmap = null,
+                isPanMode = false,
+                tracing = TracingReferenceState(),
+                isBusy = true,
+                statusBanner = null
+            )
+        }
+
+        viewModelScope.launch {
+            var renderedBitmap = newSession.initialize()
+            val pngBytes = ProjectStorage.readFileBytes(item.previewFile)
+            var loadError = false
+            if (pngBytes != null && pngBytes.isNotEmpty()) {
+                val (loaded, bmp) = newSession.loadPngBytes(pngBytes)
+                renderedBitmap = bmp
+                loadError = !loaded
+            } else {
+                loadError = true
+            }
+            val layers = newSession.getLayers()
+            val stats = newSession.getStats()
+            val arch = newSession.getRustArchInfo()
+            _uiState.update {
+                it.copy(
+                    bitmap = renderedBitmap,
+                    layers = layers,
+                    stats = stats,
+                    archInfo = arch,
+                    isBusy = false,
+                    statusBanner = if (loadError) "No se pudo leer el contenido guardado" else null
                 )
             }
         }
@@ -448,7 +528,14 @@ class CanvasViewModel : ViewModel() {
             val pngBytes = activeSession.exportPngBytes(includeBackground = true)
             val ok = pngBytes.isNotEmpty()
             if (ok) {
-                ProjectStorage.saveProjectPreview(context, title, w, h, pngBytes)
+                currentSavedFile = ProjectStorage.saveProjectPreview(
+                    context = context,
+                    projectTitle = title,
+                    width = w,
+                    height = h,
+                    pngBytes = pngBytes,
+                    previousFile = currentSavedFile
+                )
             }
             _uiState.update {
                 it.copy(
@@ -457,6 +544,90 @@ class CanvasViewModel : ViewModel() {
                 )
             }
             onComplete(ok)
+        }
+    }
+
+    fun loadTracingImage(context: Context, uri: Uri) {
+        _uiState.update { it.copy(tracing = it.tracing.copy(isLoading = true)) }
+        viewModelScope.launch {
+            val decoded = ProjectStorage.decodeTracingBitmap(context, uri)
+            if (decoded != null) {
+                _uiState.update { state ->
+                    state.copy(
+                        tracing = TracingReferenceState(
+                            bitmap = decoded,
+                            visible = true,
+                            opacity = state.tracing.opacity.coerceIn(0.15f, 1f),
+                            scale = 1f,
+                            offsetX = 0f,
+                            offsetY = 0f,
+                            isLoading = false
+                        ),
+                        statusBanner = "Imagen cargada para calcar"
+                    )
+                }
+            } else {
+                _uiState.update { state ->
+                    state.copy(
+                        tracing = state.tracing.copy(isLoading = false),
+                        statusBanner = "No se pudo cargar la imagen seleccionada"
+                    )
+                }
+            }
+        }
+    }
+
+    fun setTracingVisible(visible: Boolean) {
+        _uiState.update { state ->
+            state.copy(tracing = state.tracing.copy(visible = visible))
+        }
+    }
+
+    fun toggleTracingVisibility() {
+        _uiState.update { state ->
+            if (state.tracing.bitmap == null) state
+            else state.copy(tracing = state.tracing.copy(visible = !state.tracing.visible))
+        }
+    }
+
+    fun updateTracingOpacity(opacity: Float) {
+        _uiState.update { state ->
+            state.copy(tracing = state.tracing.copy(opacity = opacity.coerceIn(0.05f, 1f)))
+        }
+    }
+
+    fun updateTracingScale(scale: Float) {
+        _uiState.update { state ->
+            state.copy(tracing = state.tracing.copy(scale = scale.coerceIn(0.2f, 3f)))
+        }
+    }
+
+    fun updateTracingOffset(offsetX: Float, offsetY: Float) {
+        _uiState.update { state ->
+            state.copy(
+                tracing = state.tracing.copy(
+                    offsetX = offsetX.coerceIn(-0.75f, 0.75f),
+                    offsetY = offsetY.coerceIn(-0.75f, 0.75f)
+                )
+            )
+        }
+    }
+
+    fun resetTracingTransform() {
+        _uiState.update { state ->
+            state.copy(
+                tracing = state.tracing.copy(
+                    scale = 1f,
+                    offsetX = 0f,
+                    offsetY = 0f
+                )
+            )
+        }
+    }
+
+    fun clearTracingImage() {
+        _uiState.update { state ->
+            state.copy(tracing = TracingReferenceState())
         }
     }
 

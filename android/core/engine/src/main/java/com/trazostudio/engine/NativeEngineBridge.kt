@@ -74,6 +74,7 @@ internal object NativeEngineBridge {
 
     external fun nativeRenderToDirectBuffer(handlePtr: Long, directBuffer: ByteBuffer): Boolean
     external fun nativeExportPng(handlePtr: Long, includeBackground: Boolean): ByteArray
+    external fun nativeLoadPng(handlePtr: Long, pngBytes: ByteArray): Boolean
     external fun nativeGetStats(handlePtr: Long): IntArray
     external fun nativeGetLayersManifest(handlePtr: Long): String
     external fun nativeGetArchInfo(): String

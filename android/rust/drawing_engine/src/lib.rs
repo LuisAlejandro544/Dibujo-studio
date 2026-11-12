@@ -385,6 +385,23 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeExpo
         .unwrap_or_else(|_| JByteArray::default())
 }
 
+/// Carga un PNG guardado previamente en el lienzo activo dentro de Rust.
+#[no_mangle]
+pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeLoadPng(
+    env: JNIEnv,
+    _class: JClass,
+    handle_ptr: jlong,
+    png_bytes: JByteArray,
+) -> jboolean {
+    let Ok(bytes) = env.convert_byte_array(&png_bytes) else {
+        return JNI_FALSE;
+    };
+    let ok = unsafe {
+        with_engine(handle_ptr, |engine| engine.load_png(&bytes).is_ok()).unwrap_or(false)
+    };
+    if ok { JNI_TRUE } else { JNI_FALSE }
+}
+
 /// Devuelve metadatos compactos de estado: [layerCount, activeLayer, canUndo, canRedo, strokeCount].
 #[no_mangle]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeGetStats<'local>(

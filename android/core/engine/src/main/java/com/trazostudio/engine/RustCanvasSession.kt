@@ -245,6 +245,17 @@ class RustCanvasSession(
             NativeEngineBridge.nativeExportPng(nativeHandle, includeBackground)
         }
 
+    /** Carga los bytes de un PNG guardado en el motor Rust y devuelve el Bitmap actualizado. */
+    suspend fun loadPngBytes(pngBytes: ByteArray): Pair<Boolean, Bitmap> =
+        withContext(engineDispatcher) {
+            val ok = if (nativeHandle != 0L && pngBytes.isNotEmpty()) {
+                NativeEngineBridge.nativeLoadPng(nativeHandle, pngBytes)
+            } else {
+                false
+            }
+            ok to renderBitmapInternal()
+        }
+
     suspend fun getRustArchInfo(): String = withContext(Dispatchers.Default) {
         NativeEngineBridge.nativeGetArchInfo()
     }

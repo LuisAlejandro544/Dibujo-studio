@@ -2,6 +2,9 @@ package com.trazostudio.draw.data
 
 import android.content.ContentValues
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -13,6 +16,8 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 /** Metadatos de un dibujo guardado localmente en la galería interna del estudio. */
 data class SavedDrawingItem(
@@ -66,7 +71,8 @@ object ProjectStorage {
         projectTitle: String,
         width: Int,
         height: Int,
-        pngBytes: ByteArray
+        pngBytes: ByteArray,
+        previousFile: File? = null
     ): File = withContext(Dispatchers.IO) {
         val safeTitle = projectTitle
             .trim()
@@ -78,7 +84,16 @@ object ProjectStorage {
         val fileName = "${safeTitle}__${width}__${height}__${stamp}.png"
         val outFile = File(projectsDir(context), fileName)
         outFile.writeBytes(pngBytes)
+        if (previousFile != null && previousFile.absolutePath != outFile.absolutePath && previousFile.exists()) {
+            previousFile.delete()
+        }
         outFile
+    }
+
+    suspend fun readFileBytes(file: File): ByteArray? = withContext(Dispatchers.IO) {
+        runCatching {
+            if (file.exists()) file.readBytes() else null
+        }.getOrNull()
     }
 
     suspend fun deleteSavedDrawing(file: File): Boolean = withContext(Dispatchers.IO) {
@@ -137,5 +152,56 @@ object ProjectStorage {
         val file = File(exportCache, "${cleanName}_share.png")
         file.writeBytes(pngBytes)
         FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    }
+
+    /**
+     * Decodifica en segundo plano una imagen de la galería del dispositivo reduciendo su tamaño
+     * si excede `maxDimension`, evitando picos de memoria en dispositivos de 32 y 64 bits.
+     */
+    suspend fun decodeTracingBitmap(
+        context: Context,
+        uri: Uri,
+        maxDimension: Int = 1600
+    ): Bitmap? = withContext(Dispatchers.IO) {
+        runCatching {
+            val resolver = context.contentResolver
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val source = ImageDecoder.createSource(resolver, uri)
+                ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                    val srcW = info.size.width
+                    val srcH = info.size.height
+                    val maxSide = max(srcW, srcH)
+                    if (maxSide > maxDimension && maxSide > 0) {
+                        val ratio = maxDimension.toFloat() / maxSide.toFloat()
+                        decoder.setTargetSize(
+                            (srcW * ratio).roundToInt().coerceAtLeast(1),
+                            (srcH * ratio).roundToInt().coerceAtLeast(1)
+                        )
+                    }
+                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                    decoder.isMutableRequired = false
+                }
+            } else {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                resolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, bounds)
+                }
+                val srcW = bounds.outWidth
+                val srcH = bounds.outHeight
+                if (srcW <= 0 || srcH <= 0) return@runCatching null
+
+                var sampleSize = 1
+                while ((srcW / sampleSize) > maxDimension || (srcH / sampleSize) > maxDimension) {
+                    sampleSize *= 2
+                }
+                val decodeOpts = BitmapFactory.Options().apply {
+                    inSampleSize = sampleSize
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                }
+                resolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, decodeOpts)
+                }
+            }
+        }.getOrNull()
     }
 }

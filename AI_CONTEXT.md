@@ -25,9 +25,9 @@ Documento de contexto técnico para mantener coherencia arquitectónica y de pro
    - Usar únicamente dependencias `Apache-2.0`, `MIT` o `Zlib`. Prohibido introducir librerías GPL/AGPL o que exijan abrir el código o mostrar créditos obligatorios en la UI.
 6. **Diseño UI y modo inmersivo**:
    - Evitar el minimalismo extremo.
-   - Modo pantalla completa inmersivo en `MainActivity` ocultando barra de notificaciones y botones de navegación del sistema (`WindowInsetsCompat.Type.systemBars()`).
-   - Separar funcionalidades en **pantallas dedicadas** (`GalleryScreen`, `CanvasScreen`, `ExportScreen`, `SettingsScreen`) y usar **popups / hojas modales** (`BrushSettingsPopup`, `ColorPickerPopup`, `LayersPopup`, `NewCanvasPopupDialog`) para paneles secundarios.
-   - En `CanvasScreen` incluir botón para alternar entre **Mover** (pan/zoom libre) y **Dibujar**.
+   - Modo pantalla completa inmersivo en `MainActivity` ocultando barra de notificaciones y botones de navegación del sistema (`WindowInsetsCompat.Type.systemBars()`), aplicando `studioTopBarWindowInsets()` en todas las `TopAppBar` para respetar cámaras perforadas e islas dinámicas.
+   - Separar funcionalidades en **pantallas dedicadas** (`GalleryScreen`, `CanvasScreen`, `ExportScreen`, `SettingsScreen`) y usar **popups / hojas modales** (`BrushSettingsPopup`, `ColorPickerPopup`, `LayersPopup`, `TracingReferencePopup`, `NewCanvasPopupDialog`) para paneles secundarios.
+   - En `CanvasScreen` incluir botón para alternar entre **Mover** (pan, zoom y rotación del lienzo) y **Dibujar** (con transformación inversa de rotación), color inicial **negro puro** (`0xFF000000`) y opción **Calco** desde galería (tamaño, opacidad, posición y visibilidad sin alterar el PNG exportado).
    - Conservar diseño, iconos y lógica existente salvo petición expresa.
 7. **Comentarios en el código**:
    - Todos los archivos de código deben incluir comentarios claros (en español) explicando qué hace su lógica.

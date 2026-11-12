@@ -511,6 +511,98 @@ impl DrawingEngine {
         }
         Ok(png_bytes)
     }
+
+    /// Decodifica bytes PNG en memoria y carga su imagen sobre la capa de dibujo principal (`Capa 1`),
+    /// conservando la capa `Fondo` blanca para permitir seguir dibujando o borrando trazos guardados.
+    pub fn load_png(&mut self, png_bytes: &[u8]) -> Result<(), String> {
+        let mut decoder = png::Decoder::new(Cursor::new(png_bytes));
+        decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+        let mut reader = decoder
+            .read_info()
+            .map_err(|e| format!("Error al leer cabecera PNG: {e}"))?;
+
+        let mut buf = vec![0u8; reader.output_buffer_size()];
+        let info = reader
+            .next_frame(&mut buf)
+            .map_err(|e| format!("Error al decodificar PNG: {e}"))?;
+        let src = &buf[..info.buffer_size()];
+
+        let src_w = info.width as usize;
+        let src_h = info.height as usize;
+        let dst_w = self.width as usize;
+        let dst_h = self.height as usize;
+
+        if self.layers.len() < 2 {
+            let sketch_layer = Layer::new_transparent(
+                self.next_layer_id,
+                "Capa 1".to_string(),
+                self.width,
+                self.height,
+            );
+            self.next_layer_id += 1;
+            self.layers.push(sketch_layer);
+        }
+
+        let target = &mut self.layers[1];
+        target.visible = true;
+        target.opacity = 1.0;
+        target.pixels.fill(0);
+
+        let copy_w = src_w.min(dst_w);
+        let copy_h = src_h.min(dst_h);
+        let channels = match info.color_type {
+            png::ColorType::Rgba => 4,
+            png::ColorType::Rgb => 3,
+            png::ColorType::GrayscaleAlpha => 2,
+            png::ColorType::Grayscale => 1,
+            png::ColorType::Indexed => return Err("Formato PNG indexado no expandido".to_string()),
+        };
+
+        for y in 0..copy_h {
+            for x in 0..copy_w {
+                let s_idx = (y * src_w + x) * channels;
+                let d_idx = (y * dst_w + x) * 4;
+                if s_idx + channels > src.len() || d_idx + 4 > target.pixels.len() {
+                    continue;
+                }
+                match channels {
+                    4 => {
+                        target.pixels[d_idx] = src[s_idx];
+                        target.pixels[d_idx + 1] = src[s_idx + 1];
+                        target.pixels[d_idx + 2] = src[s_idx + 2];
+                        target.pixels[d_idx + 3] = src[s_idx + 3];
+                    }
+                    3 => {
+                        target.pixels[d_idx] = src[s_idx];
+                        target.pixels[d_idx + 1] = src[s_idx + 1];
+                        target.pixels[d_idx + 2] = src[s_idx + 2];
+                        target.pixels[d_idx + 3] = 255;
+                    }
+                    2 => {
+                        let g = src[s_idx];
+                        target.pixels[d_idx] = g;
+                        target.pixels[d_idx + 1] = g;
+                        target.pixels[d_idx + 2] = g;
+                        target.pixels[d_idx + 3] = src[s_idx + 1];
+                    }
+                    _ => {
+                        let g = src[s_idx];
+                        target.pixels[d_idx] = g;
+                        target.pixels[d_idx + 1] = g;
+                        target.pixels[d_idx + 2] = g;
+                        target.pixels[d_idx + 3] = 255;
+                    }
+                }
+            }
+        }
+
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.active_layer_index = 1;
+        self.mark_full_dirty();
+        self.recomposite();
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -565,5 +657,24 @@ mod tests {
         let mut engine = DrawingEngine::new(64, 64);
         let bytes = engine.encode_png(true).expect("PNG debe codificar sin errores");
         assert!(bytes.starts_with(&[0x89, b'P', b'N', b'G']));
+    }
+
+    #[test]
+    fn engine_saves_and_reloads_png_pixels() {
+        let mut engine = DrawingEngine::new(96, 96);
+        let brush = BrushConfig {
+            kind: BrushKind::Brush,
+            color: RgbaColor { r: 210, g: 30, b: 40, a: 255 },
+            radius: 8.0,
+            opacity: 1.0,
+            hardness: 0.9,
+        };
+        engine.apply_dab(48.0, 48.0, brush);
+        let bytes = engine.encode_png(true).expect("Debe exportar PNG");
+
+        let mut reopened = DrawingEngine::new(96, 96);
+        reopened.load_png(&bytes).expect("Debe recargar PNG guardado");
+        let center = reopened.pick_color(48, 48);
+        assert!(center.r > 180 && center.g < 60);
     }
 }
