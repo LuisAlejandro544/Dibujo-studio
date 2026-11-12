@@ -55,9 +55,9 @@ pub fn stamp_dab(
     let outer_r = radius + aa_margin;
 
     let min_x = (cx - outer_r).floor().max(0.0) as i32;
-    let max_x = (cx + outer_r).ceil().min((width as i32) - 1) as i32;
+    let max_x = ((cx + outer_r).ceil() as i32).min((width as i32) - 1);
     let min_y = (cy - outer_r).floor().max(0.0) as i32;
-    let max_y = (cy + outer_r).ceil().min((height as i32) - 1) as i32;
+    let max_y = ((cy + outer_r).ceil() as i32).min((height as i32) - 1);
 
     if min_x > max_x || min_y > max_y {
         return;
