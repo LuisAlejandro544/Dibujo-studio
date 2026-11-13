@@ -92,9 +92,10 @@ jobs:
           echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
           echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
 
-      - name: Instalar Rust estable y targets Android (${{ inputs.abi_mode }})
-        uses: dtolnay/rust-toolchain@stable
+      - name: Instalar Rust 1.100.0 y targets Android (${{ inputs.abi_mode }})
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.100.0"
           targets: ${{ inputs.abi_mode == 'arm64-v8a' && 'aarch64-linux-android' || 'armv7-linux-androideabi,aarch64-linux-android,i686-linux-android,x86_64-linux-android' }}
 
       - name: Instalar cargo-ndk para compilar librerías .so de Android

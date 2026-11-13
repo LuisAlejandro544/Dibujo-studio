@@ -1,6 +1,13 @@
 package com.trazostudio.draw.ui.canvas
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -335,42 +342,53 @@ fun CanvasScreen(
             )
         },
         bottomBar = {
-            if (state.isAdjustingTracing) {
-                TracingAdjustDock(
-                    scale = state.tracing.scale,
-                    rotationDegrees = state.tracing.rotationDegrees,
-                    opacity = state.tracing.opacity,
-                    onChangeOpacity = { viewModel.updateTracingOpacity(it) },
-                    onResetTracing = { viewModel.resetTracingTransform() },
-                    onDone = { viewModel.setTracingAdjustMode(false) }
-                )
-            } else {
-                StudioBottomDock(
-                    activeTool = state.brush.tool,
-                    isPanMode = state.isPanMode,
-                    hasTracingImage = state.tracing.bitmap != null,
-                    isTracingVisible = state.tracing.visible,
-                    activeColorArgb = state.brush.argbColor,
-                    brushRadius = state.brush.radiusPx,
-                    zoomPercent = (zoom * 100).roundToInt(),
-                    rotationDegrees = rotationDegrees,
-                    onSelectTool = { viewModel.selectTool(it) },
-                    onTogglePanMode = { viewModel.togglePanMode() },
-                    onOpenColorPicker = { showColorPopup = true },
-                    onOpenBrushSettings = { showBrushPopup = true },
-                    onOpenTracing = { showTracingPopup = true },
-                    onToggleTracingVisibility = { viewModel.toggleTracingVisibility() },
-                    onAdjustTracing = { viewModel.setTracingAdjustMode(true) },
-                    onOpenTracingAi = {
-                        viewModel.analyzeTracingWithAi()
-                        showTracingAiPopup = true
-                    },
-                    onResetViewport = {
-                        zoom = 1f
-                        rotationDegrees = 0f
-                        panOffset = Offset.Zero
-                    }
-                )
+            AnimatedContent(
+                targetState = state.isAdjustingTracing,
+                transitionSpec = {
+                    (slideInVertically(animationSpec = tween(260)) { it / 2 } + fadeIn(tween(220)))
+                        .togetherWith(
+                            slideOutVertically(animationSpec = tween(200)) { it / 2 } + fadeOut(tween(180))
+                        )
+                },
+                label = "studioBottomDockTransition"
+            ) { adjustingTracing ->
+                if (adjustingTracing) {
+                    TracingAdjustDock(
+                        scale = state.tracing.scale,
+                        rotationDegrees = state.tracing.rotationDegrees,
+                        opacity = state.tracing.opacity,
+                        onChangeOpacity = { viewModel.updateTracingOpacity(it) },
+                        onResetTracing = { viewModel.resetTracingTransform() },
+                        onDone = { viewModel.setTracingAdjustMode(false) }
+                    )
+                } else {
+                    StudioBottomDock(
+                        activeTool = state.brush.tool,
+                        isPanMode = state.isPanMode,
+                        hasTracingImage = state.tracing.bitmap != null,
+                        isTracingVisible = state.tracing.visible,
+                        activeColorArgb = state.brush.argbColor,
+                        brushRadius = state.brush.radiusPx,
+                        zoomPercent = (zoom * 100).roundToInt(),
+                        rotationDegrees = rotationDegrees,
+                        onSelectTool = { viewModel.selectTool(it) },
+                        onTogglePanMode = { viewModel.togglePanMode() },
+                        onOpenColorPicker = { showColorPopup = true },
+                        onOpenBrushSettings = { showBrushPopup = true },
+                        onOpenTracing = { showTracingPopup = true },
+                        onToggleTracingVisibility = { viewModel.toggleTracingVisibility() },
+                        onAdjustTracing = { viewModel.setTracingAdjustMode(true) },
+                        onOpenTracingAi = {
+                            viewModel.analyzeTracingWithAi()
+                            showTracingAiPopup = true
+                        },
+                        onResetViewport = {
+                            zoom = 1f
+                            rotationDegrees = 0f
+                            panOffset = Offset.Zero
+                        }
+                    )
+                }
             }
         }
     ) { innerPadding ->

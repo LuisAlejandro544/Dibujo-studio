@@ -260,6 +260,7 @@ pub enum HistorySnapshot {
         tiles: Vec<TileBackup>,
         dirty_rect: (u32, u32, u32, u32),
     },
+    #[allow(dead_code)]
     FullLayer {
         layer_index: usize,
         pixels: Vec<u8>,

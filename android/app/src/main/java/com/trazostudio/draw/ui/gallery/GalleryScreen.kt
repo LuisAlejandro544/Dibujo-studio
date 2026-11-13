@@ -1,5 +1,10 @@
 package com.trazostudio.draw.ui.gallery
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,6 +43,7 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -107,6 +113,7 @@ fun GalleryScreen(
 
     var savedItems by remember { mutableStateOf<List<SavedDrawingItem>>(emptyList()) }
     var showNewCanvasDialog by remember { mutableStateOf(false) }
+    var pendingDeleteItem by remember { mutableStateOf<SavedDrawingItem?>(null) }
 
     val templates = remember(preferences) {
         listOf(
@@ -279,77 +286,84 @@ fun GalleryScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            if (savedItems.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Card(
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface
-                        ),
-                        modifier = Modifier.fillMaxWidth()
+            AnimatedContent(
+                targetState = savedItems.isEmpty(),
+                transitionSpec = {
+                    fadeIn(animationSpec = tween(260))
+                        .togetherWith(fadeOut(animationSpec = tween(200)))
+                },
+                label = "gallerySavedContentTransition"
+            ) { isEmpty ->
+                if (isEmpty) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Column(
-                            modifier = Modifier.padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                        Card(
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface
+                            ),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Brush,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(44.dp)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = "Tu mesa de trabajo está lista",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = "Elige una plantilla arriba o pulsa 'Nuevo lienzo' para empezar a dibujar con el motor nativo en Rust.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(
-                                onClick = {
-                                    onOpenNewCanvas(
-                                        "Primer Boceto",
-                                        preferences.defaultWidth,
-                                        preferences.defaultHeight
-                                    )
-                                }
+                            Column(
+                                modifier = Modifier.padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text("Abrir lienzo ahora")
+                                Icon(
+                                    imageVector = Icons.Rounded.Brush,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(44.dp)
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = "Tu mesa de trabajo está lista",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Elige una plantilla arriba o pulsa 'Nuevo lienzo' para empezar a dibujar con el motor nativo en Rust.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Button(
+                                    onClick = {
+                                        onOpenNewCanvas(
+                                            "Primer Boceto",
+                                            preferences.defaultWidth,
+                                            preferences.defaultHeight
+                                        )
+                                    }
+                                ) {
+                                    Text("Abrir lienzo ahora")
+                                }
                             }
                         }
                     }
-                }
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 156.dp),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 88.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(savedItems, key = { it.id }) { item ->
-                        SavedArtworkCard(
-                            item = item,
-                            onDelete = {
-                                scope.launch {
-                                    ProjectStorage.deleteSavedDrawing(item.previewFile)
-                                    savedItems = ProjectStorage.listSavedDrawings(context)
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 156.dp),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 88.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(savedItems, key = { it.id }) { item ->
+                            SavedArtworkCard(
+                                item = item,
+                                modifier = Modifier.animateItem(),
+                                onDelete = {
+                                    pendingDeleteItem = item
+                                },
+                                onOpenTemplate = {
+                                    onOpenSavedArtwork(item)
                                 }
-                            },
-                            onOpenTemplate = {
-                                onOpenSavedArtwork(item)
-                            }
-                        )
+                            )
+                        }
                     }
                 }
             }
@@ -367,11 +381,56 @@ fun GalleryScreen(
             }
         )
     }
+
+    val itemToDelete = pendingDeleteItem
+    if (itemToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { pendingDeleteItem = null },
+            icon = {
+                Icon(
+                    imageVector = Icons.Rounded.DeleteOutline,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+            },
+            title = {
+                Text("¿Eliminar dibujo?", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    "Se eliminará «${itemToDelete.title}» (${itemToDelete.width}×${itemToDelete.height} px) de tu galería local. Esta acción no se puede deshacer."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingDeleteItem = null
+                        scope.launch {
+                            ProjectStorage.deleteSavedDrawing(itemToDelete.previewFile)
+                            savedItems = ProjectStorage.listSavedDrawings(context)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
+                ) {
+                    Text("Eliminar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteItem = null }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
 }
 
 @Composable
 private fun SavedArtworkCard(
     item: SavedDrawingItem,
+    modifier: Modifier = Modifier,
     onDelete: () -> Unit,
     onOpenTemplate: () -> Unit
 ) {
@@ -388,7 +447,7 @@ private fun SavedArtworkCard(
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
             .clickable { onOpenTemplate() }

@@ -417,8 +417,16 @@ fn extract_coloring_palette(
         i += stride;
     }
 
-    // Si es un dibujo en blanco y negro / solo líneas sin relleno de color, incluir tonos medios grises si existen.
+    // Si es un dibujo en blanco y negro / solo líneas sin relleno de color, garantizar al menos un color de tinta.
     if samples.len() < 12 {
+        if entries.is_empty() {
+            entries.push(PaletteEntry {
+                color: outline_color,
+                coverage_pct: 100,
+                is_outline: true,
+                role_code: 0,
+            });
+        }
         return entries;
     }
 
@@ -570,6 +578,15 @@ fn extract_coloring_palette(
             coverage_pct: pct,
             is_outline: false,
             role_code,
+        });
+    }
+
+    if entries.is_empty() {
+        entries.push(PaletteEntry {
+            color: outline_color,
+            coverage_pct: 100,
+            is_outline: true,
+            role_code: 0,
         });
     }
 

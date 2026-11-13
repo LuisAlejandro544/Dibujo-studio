@@ -41,12 +41,12 @@ unsafe fn with_engine<R>(handle_ptr: jlong, f: impl FnOnce(&mut DrawingEngine) -
     if handle_ptr == 0 {
         return None;
     }
-    let handle = &*(handle_ptr as usize as *const EngineHandle);
+    let handle = unsafe { &*(handle_ptr as usize as *const EngineHandle) };
     let mut guard = handle.inner.lock();
     Some(f(&mut guard))
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeCreateEngine(
     _env: JNIEnv,
     _class: JClass,
@@ -61,7 +61,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeCrea
     Arc::into_raw(boxed) as usize as jlong
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeDestroyEngine(
     _env: JNIEnv,
     _class: JClass,
@@ -74,7 +74,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeDest
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeBeginStroke(
     _env: JNIEnv,
     _class: JClass,
@@ -87,7 +87,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeBegi
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeEndStroke(
     _env: JNIEnv,
     _class: JClass,
@@ -100,7 +100,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeEndS
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeApplyDab(
     _env: JNIEnv,
     _class: JClass,
@@ -127,7 +127,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeAppl
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeApplySegment(
     _env: JNIEnv,
     _class: JClass,
@@ -157,7 +157,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeAppl
 }
 
 /// Rasteriza un lote de segmentos `[x0, y0, x1, y1, ...]` en una sola llamada JNI.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeApplySegmentsBatch(
     env: JNIEnv,
     _class: JClass,
@@ -197,7 +197,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeAppl
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeFloodFill(
     _env: JNIEnv,
     _class: JClass,
@@ -215,7 +215,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeFloo
     if changed { JNI_TRUE } else { JNI_FALSE }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativePickColor(
     _env: JNIEnv,
     _class: JClass,
@@ -229,7 +229,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativePick
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeClearActiveLayer(
     _env: JNIEnv,
     _class: JClass,
@@ -240,7 +240,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeClea
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeUndo(
     _env: JNIEnv,
     _class: JClass,
@@ -250,7 +250,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeUndo
     if ok { JNI_TRUE } else { JNI_FALSE }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeRedo(
     _env: JNIEnv,
     _class: JClass,
@@ -260,7 +260,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeRedo
     if ok { JNI_TRUE } else { JNI_FALSE }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeAddLayer(
     mut env: JNIEnv,
     _class: JClass,
@@ -278,7 +278,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeAddL
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeDeleteLayer(
     _env: JNIEnv,
     _class: JClass,
@@ -292,7 +292,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeDele
     if ok { JNI_TRUE } else { JNI_FALSE }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeSetLayerVisibility(
     _env: JNIEnv,
     _class: JClass,
@@ -307,7 +307,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeSetL
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeSetLayerOpacity(
     _env: JNIEnv,
     _class: JClass,
@@ -322,7 +322,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeSetL
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeSetActiveLayer(
     _env: JNIEnv,
     _class: JClass,
@@ -336,7 +336,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeSetA
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeMergeLayerDown(
     _env: JNIEnv,
     _class: JClass,
@@ -352,7 +352,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeMerg
 
 /// Activa o desactiva la omisión de la capa base blanca al renderizar en pantalla
 /// para que el calco se dibuje detrás de los trazos sin velarlos.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeSetExcludeBaseLayer(
     _env: JNIEnv,
     _class: JClass,
@@ -367,7 +367,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeSetE
 }
 
 /// Recompone únicamente la región sucia pendiente y escribe `[x, y, w, h]` en `out_rect`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativePrepareRender(
     env: JNIEnv,
     _class: JClass,
@@ -386,7 +386,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativePrep
 
 /// Copia únicamente los píxeles de la subregión `(x, y, w, h)` en formato ARGB (`0xAARRGGBB`)
 /// hacia `out_argb` para actualizar solo el área modificada del `Bitmap` en Kotlin.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeCopyRegionArgb(
     env: JNIEnv,
     _class: JClass,
@@ -425,7 +425,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeCopy
 }
 
 /// Copia la imagen compuesta RGBA8888 al ByteBuffer directo proporcionado por Kotlin.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeRenderToDirectBuffer(
     env: JNIEnv,
     _class: JClass,
@@ -457,7 +457,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeRend
 }
 
 /// Exporta el lienzo actual en bytes PNG listos para guardar en galería o compartir.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeExportPng<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
@@ -478,7 +478,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeExpo
 }
 
 /// Exporta el proyecto completo con todas sus capas en formato binario `.trazo`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeExportProject<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
@@ -493,7 +493,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeExpo
 }
 
 /// Carga un proyecto `.trazo` conservando todas las capas, opacidad, visibilidad y nombres.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeLoadProject(
     env: JNIEnv,
     _class: JClass,
@@ -510,7 +510,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeLoad
 }
 
 /// Carga un PNG guardado previamente en el lienzo activo dentro de Rust.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeLoadPng(
     env: JNIEnv,
     _class: JClass,
@@ -528,7 +528,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeLoad
 
 /// Devuelve metadatos compactos de estado:
 /// [layerCount, activeLayer, canUndo, canRedo, strokeCount, baseVisible, baseModified].
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeGetStats<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
@@ -555,7 +555,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeGetS
 }
 
 /// Devuelve el nombre y visibilidad/opacidad codificados de cada capa como cadena separada por líneas.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeGetLayersManifest<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
@@ -587,7 +587,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeGetL
 }
 
 /// Informa la arquitectura nativa con la que se compiló esta librería Rust (.so).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeGetArchInfo<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
@@ -600,7 +600,7 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeGetA
 
 /// Analiza en Rust la imagen de calco (grosores de línea escalados al lienzo y paleta para colorear)
 /// devolviendo un manifiesto compacto de líneas `META|...` y `COLOR|...`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeAnalyzeTracingImage<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
