@@ -12,17 +12,19 @@ Plan de evolución por fases para el estudio de dibujo **Kotlin + Rust**.
 - [x] Flujo manual en GitHub Actions sin caché para compilar APK Debug eligiendo `universal` (32/64-bit) o `arm64-v8a` (solo 64-bit).
 
 ## Fase 2 — Precisión de trazo y herramientas artísticas
+- [x] Calco inteligente desde galería: ajuste directo con dedos (mover, escalar y rotar en lienzo), modo debajo del trazo o Multiplicar, y **Asistente IA local en Rust** (`tracing_ai.rs`) para grosores de trazo (ojos/detalles, contorno, grueso) y paleta para colorear.
+- [x] Navegación móvil pulida: barra inferior raíz entre Galería/Ajustes con transiciones animadas, dock de estudio en 2 niveles sin scroll oculto en herramientas, diálogo anti-pérdida al salir y margen superior ajustado sin franjas vacías.
 - [ ] Estabilizador de trazo en tiempo real en Rust (suavizado por promedio móvil / cuerda tensa).
 - [ ] Soporte para sensibilidad de presión y ángulo de stylus (`MotionEvent.getPressure()`).
 - [ ] Modos de simetría (espejo horizontal, vertical y radial) calculados en Rust.
 - [ ] Reglas geométricas básicas (línea recta, círculo y rectángulo) en el rasterizador.
 
 ## Fase 3 — Persistencia avanzada y capas profesionales
-- [ ] Guardado y reapertura de proyectos editables conservando todas las capas en formato binario propio (`.trazo`).
+- [x] Guardado y reapertura de proyectos editables conservando todas las capas en formato binario propio (`.trazo`).
 - [ ] Modos de fusión de capas en Rust (`Multiply`, `Screen`, `Overlay`, `Add`).
 - [ ] Transformación de capa (mover, escalar, rotar) ejecutada en memoria nativa.
 
 ## Fase 4 — Optimización y publicación (Uptodown / APK directo)
-- [x] Renderizado parcial por regiones sucias (*dirty rects*) en `composited_buffer`, lotes JNI y doble búfer de `Bitmap` para trazos fluidos.
+- [x] Renderizado parcial por regiones sucias (*dirty rects*) en `composited_buffer`, lotes JNI, transferencia regional (`Bitmap.setPixels`), historial incremental por baldosas 64×64 para 32/64 bits y miniaturas escaladas en galería.
 - [ ] Firma keystore para publicación de APK Release en Uptodown y canales de terceros.
 - [ ] Pruebas instrumentadas de JNI en emuladores ARM64 y x86.

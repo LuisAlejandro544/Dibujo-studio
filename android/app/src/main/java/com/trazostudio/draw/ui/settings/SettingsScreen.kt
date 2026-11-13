@@ -61,7 +61,8 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     preferences: StudioPreferences,
     preferencesRepo: StudioPreferencesRepository,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    bottomBar: @Composable () -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     var rustArch by remember { mutableStateOf("Cargando...") }
@@ -87,7 +88,8 @@ fun SettingsScreen(
                 },
                 title = { Text("Ajustes del Estudio", fontWeight = FontWeight.Bold) }
             )
-        }
+        },
+        bottomBar = bottomBar
     ) { innerPadding ->
         Column(
             modifier = Modifier

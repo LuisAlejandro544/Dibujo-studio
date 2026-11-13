@@ -12,6 +12,10 @@ import com.trazostudio.engine.CanvasStats
 import com.trazostudio.engine.LayerInfo
 import com.trazostudio.engine.RustCanvasSession
 import com.trazostudio.engine.ToolType
+import com.trazostudio.engine.TracingAiAnalysis
+import com.trazostudio.engine.TracingStrokePreset
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,11 +30,16 @@ import java.io.File
 data class TracingReferenceState(
     val bitmap: Bitmap? = null,
     val visible: Boolean = true,
+    val overlayOnTop: Boolean = false,
     val opacity: Float = 0.45f,
     val scale: Float = 1f,
+    val rotationDegrees: Float = 0f,
     val offsetX: Float = 0f,
     val offsetY: Float = 0f,
-    val isLoading: Boolean = false
+    val isLoading: Boolean = false,
+    val aiAnalysis: TracingAiAnalysis? = null,
+    val aiAnalyzedScale: Float = 1f,
+    val isAnalyzingAi: Boolean = false
 )
 
 /**
@@ -43,6 +52,7 @@ data class CanvasUiState(
     val bitmap: Bitmap? = null,
     val brush: BrushSettings = BrushSettings(),
     val isPanMode: Boolean = false,
+    val isAdjustingTracing: Boolean = false,
     val tracing: TracingReferenceState = TracingReferenceState(),
     val recentColors: List<Int> = listOf(
         0xFF000000.toInt(),
@@ -84,6 +94,7 @@ class CanvasViewModel : ViewModel() {
     private var pendingDabY = 0f
     private val pendingSegmentCoords = ArrayList<Float>(128)
     private var pendingBrush: BrushSettings? = null
+    private var pendingEndStroke = false
     private var pendingCancelUndo = false
     private var pendingStatsRefresh = false
     private var flushRunning = false
@@ -95,6 +106,7 @@ class CanvasViewModel : ViewModel() {
             pendingHasDab = false
             pendingSegmentCoords.clear()
             pendingBrush = null
+            pendingEndStroke = false
             pendingCancelUndo = false
             pendingStatsRefresh = false
             strokeStartedInGesture = false
@@ -111,6 +123,7 @@ class CanvasViewModel : ViewModel() {
                 canvasHeight = height,
                 bitmap = null,
                 isPanMode = false,
+                isAdjustingTracing = false,
                 tracing = TracingReferenceState(),
                 isBusy = true,
                 statusBanner = null
@@ -144,6 +157,7 @@ class CanvasViewModel : ViewModel() {
             pendingHasDab = false
             pendingSegmentCoords.clear()
             pendingBrush = null
+            pendingEndStroke = false
             pendingCancelUndo = false
             pendingStatsRefresh = false
             strokeStartedInGesture = false
@@ -160,6 +174,7 @@ class CanvasViewModel : ViewModel() {
                 canvasHeight = item.height,
                 bitmap = null,
                 isPanMode = false,
+                isAdjustingTracing = false,
                 tracing = TracingReferenceState(),
                 isBusy = true,
                 statusBanner = null
@@ -168,15 +183,29 @@ class CanvasViewModel : ViewModel() {
 
         viewModelScope.launch {
             var renderedBitmap = newSession.initialize()
-            val pngBytes = ProjectStorage.readFileBytes(item.previewFile)
-            var loadError = false
-            if (pngBytes != null && pngBytes.isNotEmpty()) {
-                val (loaded, bmp) = newSession.loadPngBytes(pngBytes)
-                renderedBitmap = bmp
-                loadError = !loaded
-            } else {
-                loadError = true
+            var loaded = false
+
+            val trazoFile = item.projectFile
+            if (trazoFile != null && trazoFile.exists()) {
+                val projectBytes = ProjectStorage.readFileBytes(trazoFile)
+                if (projectBytes != null && projectBytes.isNotEmpty()) {
+                    val (ok, bmp) = newSession.loadProjectBytes(projectBytes)
+                    if (ok) {
+                        renderedBitmap = bmp
+                        loaded = true
+                    }
+                }
             }
+
+            if (!loaded) {
+                val pngBytes = ProjectStorage.readFileBytes(item.previewFile)
+                if (pngBytes != null && pngBytes.isNotEmpty()) {
+                    val (ok, bmp) = newSession.loadPngBytes(pngBytes)
+                    renderedBitmap = bmp
+                    loaded = ok
+                }
+            }
+
             val layers = newSession.getLayers()
             val stats = newSession.getStats()
             val arch = newSession.getRustArchInfo()
@@ -187,7 +216,7 @@ class CanvasViewModel : ViewModel() {
                     stats = stats,
                     archInfo = arch,
                     isBusy = false,
-                    statusBanner = if (loadError) "No se pudo leer el contenido guardado" else null
+                    statusBanner = if (!loaded) "No se pudo leer el contenido guardado" else null
                 )
             }
         }
@@ -197,20 +226,44 @@ class CanvasViewModel : ViewModel() {
         _uiState.update { state ->
             state.copy(
                 brush = state.brush.copy(tool = tool),
-                isPanMode = false
+                isPanMode = false,
+                isAdjustingTracing = false
             )
         }
     }
 
     fun togglePanMode() {
         _uiState.update { state ->
-            state.copy(isPanMode = !state.isPanMode)
+            state.copy(
+                isPanMode = !state.isPanMode,
+                isAdjustingTracing = false
+            )
         }
     }
 
     fun setPanMode(enabled: Boolean) {
         _uiState.update { state ->
-            state.copy(isPanMode = enabled)
+            state.copy(
+                isPanMode = enabled,
+                isAdjustingTracing = if (enabled) false else state.isAdjustingTracing
+            )
+        }
+    }
+
+    fun setTracingAdjustMode(enabled: Boolean) {
+        _uiState.update { state ->
+            if (enabled && state.tracing.bitmap == null) {
+                state
+            } else {
+                state.copy(
+                    isAdjustingTracing = enabled,
+                    isPanMode = if (enabled) false else state.isPanMode,
+                    tracing = if (enabled) state.tracing.copy(visible = true) else state.tracing
+                )
+            }
+        }
+        if (enabled) {
+            syncTracingBaseExclusion()
         }
     }
 
@@ -320,6 +373,7 @@ class CanvasViewModel : ViewModel() {
         val activeSession = session ?: return
         strokeStartedInGesture = false
         synchronized(strokeQueueLock) {
+            pendingEndStroke = true
             pendingStatsRefresh = true
         }
         scheduleStrokeFlush(activeSession)
@@ -339,9 +393,11 @@ class CanvasViewModel : ViewModel() {
                 pendingBeginTransaction = false
                 pendingHasDab = false
                 pendingSegmentCoords.clear()
+                pendingEndStroke = false
                 pendingStatsRefresh = true
             } else {
                 pendingSegmentCoords.clear()
+                pendingEndStroke = false
                 pendingCancelUndo = true
                 pendingStatsRefresh = true
             }
@@ -363,12 +419,13 @@ class CanvasViewModel : ViewModel() {
                 var dabY = 0f
                 var coords = FloatArray(0)
                 var brush: BrushSettings? = null
+                var doEndStroke = false
                 var doCancelUndo = false
                 var doStatsRefresh = false
 
                 synchronized(strokeQueueLock) {
                     val hasDrawWork = pendingBeginTransaction || pendingHasDab || pendingSegmentCoords.isNotEmpty()
-                    if (!hasDrawWork && !pendingCancelUndo && !pendingStatsRefresh) {
+                    if (!hasDrawWork && !pendingEndStroke && !pendingCancelUndo && !pendingStatsRefresh) {
                         flushRunning = false
                         return@launch
                     }
@@ -381,10 +438,12 @@ class CanvasViewModel : ViewModel() {
                         pendingSegmentCoords.clear()
                     }
                     brush = pendingBrush
+                    doEndStroke = pendingEndStroke
                     doCancelUndo = pendingCancelUndo
                     doStatsRefresh = pendingStatsRefresh
                     pendingBeginTransaction = false
                     pendingHasDab = false
+                    pendingEndStroke = false
                     pendingCancelUndo = false
                     pendingStatsRefresh = false
                 }
@@ -406,6 +465,10 @@ class CanvasViewModel : ViewModel() {
                             stats = if (beginTx) state.stats.copy(canUndo = true) else state.stats
                         )
                     }
+                }
+
+                if (doEndStroke) {
+                    activeSession.endStroke()
                 }
 
                 if (doCancelUndo) {
@@ -492,9 +555,9 @@ class CanvasViewModel : ViewModel() {
     fun selectActiveLayer(index: Int) {
         val activeSession = session ?: return
         viewModelScope.launch {
-            activeSession.setActiveLayer(index)
+            val bmp = activeSession.setActiveLayer(index)
             val stats = activeSession.getStats()
-            _uiState.update { it.copy(stats = stats) }
+            _uiState.update { it.copy(bitmap = bmp, stats = stats) }
         }
     }
 
@@ -517,33 +580,49 @@ class CanvasViewModel : ViewModel() {
         return activeSession.exportPngBytes(includeBackground)
     }
 
-    fun saveToInternalGallery(context: Context, onComplete: (Boolean) -> Unit) {
-        val activeSession = session ?: return
+    suspend fun saveProjectFiles(context: Context): Boolean {
+        val activeSession = session ?: return false
         val title = _uiState.value.projectTitle
         val w = _uiState.value.canvasWidth
         val h = _uiState.value.canvasHeight
+        val pngBytes = activeSession.exportPngBytes(includeBackground = true)
+        if (pngBytes.isEmpty()) return false
+        val projectBytes = activeSession.exportProjectBytes()
+        currentSavedFile = ProjectStorage.saveProjectPreview(
+            context = context,
+            projectTitle = title,
+            width = w,
+            height = h,
+            pngBytes = pngBytes,
+            previousFile = currentSavedFile,
+            projectBytes = projectBytes
+        )
+        return true
+    }
 
+    fun saveToInternalGallery(context: Context, onComplete: (Boolean) -> Unit) {
+        if (session == null) return
         viewModelScope.launch {
             _uiState.update { it.copy(isBusy = true) }
-            val pngBytes = activeSession.exportPngBytes(includeBackground = true)
-            val ok = pngBytes.isNotEmpty()
-            if (ok) {
-                currentSavedFile = ProjectStorage.saveProjectPreview(
-                    context = context,
-                    projectTitle = title,
-                    width = w,
-                    height = h,
-                    pngBytes = pngBytes,
-                    previousFile = currentSavedFile
-                )
-            }
+            val ok = saveProjectFiles(context)
             _uiState.update {
                 it.copy(
                     isBusy = false,
-                    statusBanner = if (ok) "Guardado en la galería del estudio" else "Error al guardar"
+                    statusBanner = if (ok) "Guardado con capas en la galería del estudio" else "Error al guardar"
                 )
             }
             onComplete(ok)
+        }
+    }
+
+    private fun syncTracingBaseExclusion() {
+        val activeSession = session ?: return
+        val tracing = _uiState.value.tracing
+        val excludeBase = tracing.bitmap != null && tracing.visible && !tracing.overlayOnTop
+        viewModelScope.launch {
+            val bmp = activeSession.setExcludeBaseLayer(excludeBase)
+            val stats = activeSession.getStats()
+            _uiState.update { it.copy(bitmap = bmp, stats = stats) }
         }
     }
 
@@ -557,15 +636,21 @@ class CanvasViewModel : ViewModel() {
                         tracing = TracingReferenceState(
                             bitmap = decoded,
                             visible = true,
+                            overlayOnTop = state.tracing.overlayOnTop,
                             opacity = state.tracing.opacity.coerceIn(0.15f, 1f),
                             scale = 1f,
+                            rotationDegrees = 0f,
                             offsetX = 0f,
                             offsetY = 0f,
                             isLoading = false
                         ),
-                        statusBanner = "Imagen cargada para calcar"
+                        isAdjustingTracing = true,
+                        isPanMode = false,
+                        statusBanner = "Mueve y pellizca la imagen con tus dedos; pulsa Listo al terminar"
                     )
                 }
+                syncTracingBaseExclusion()
+                analyzeTracingWithAi(forceRefresh = true)
             } else {
                 _uiState.update { state ->
                     state.copy(
@@ -579,15 +664,33 @@ class CanvasViewModel : ViewModel() {
 
     fun setTracingVisible(visible: Boolean) {
         _uiState.update { state ->
-            state.copy(tracing = state.tracing.copy(visible = visible))
+            state.copy(
+                tracing = state.tracing.copy(visible = visible),
+                isAdjustingTracing = if (!visible) false else state.isAdjustingTracing
+            )
         }
+        syncTracingBaseExclusion()
     }
 
     fun toggleTracingVisibility() {
         _uiState.update { state ->
             if (state.tracing.bitmap == null) state
-            else state.copy(tracing = state.tracing.copy(visible = !state.tracing.visible))
+            else {
+                val nextVisible = !state.tracing.visible
+                state.copy(
+                    tracing = state.tracing.copy(visible = nextVisible),
+                    isAdjustingTracing = if (!nextVisible) false else state.isAdjustingTracing
+                )
+            }
         }
+        syncTracingBaseExclusion()
+    }
+
+    fun setTracingOverlayOnTop(overlayOnTop: Boolean) {
+        _uiState.update { state ->
+            state.copy(tracing = state.tracing.copy(overlayOnTop = overlayOnTop))
+        }
+        syncTracingBaseExclusion()
     }
 
     fun updateTracingOpacity(opacity: Float) {
@@ -598,7 +701,7 @@ class CanvasViewModel : ViewModel() {
 
     fun updateTracingScale(scale: Float) {
         _uiState.update { state ->
-            state.copy(tracing = state.tracing.copy(scale = scale.coerceIn(0.2f, 3f)))
+            state.copy(tracing = state.tracing.copy(scale = scale.coerceIn(0.15f, 5f)))
         }
     }
 
@@ -606,8 +709,27 @@ class CanvasViewModel : ViewModel() {
         _uiState.update { state ->
             state.copy(
                 tracing = state.tracing.copy(
-                    offsetX = offsetX.coerceIn(-0.75f, 0.75f),
-                    offsetY = offsetY.coerceIn(-0.75f, 0.75f)
+                    offsetX = offsetX.coerceIn(-1.5f, 1.5f),
+                    offsetY = offsetY.coerceIn(-1.5f, 1.5f)
+                )
+            )
+        }
+    }
+
+    fun transformTracingBy(
+        deltaOffsetX: Float,
+        deltaOffsetY: Float,
+        scaleFactor: Float,
+        deltaRotationDegrees: Float
+    ) {
+        _uiState.update { state ->
+            val t = state.tracing
+            state.copy(
+                tracing = t.copy(
+                    offsetX = (t.offsetX + deltaOffsetX).coerceIn(-1.5f, 1.5f),
+                    offsetY = (t.offsetY + deltaOffsetY).coerceIn(-1.5f, 1.5f),
+                    scale = (t.scale * scaleFactor).coerceIn(0.15f, 5f),
+                    rotationDegrees = (t.rotationDegrees + deltaRotationDegrees) % 360f
                 )
             )
         }
@@ -618,6 +740,7 @@ class CanvasViewModel : ViewModel() {
             state.copy(
                 tracing = state.tracing.copy(
                     scale = 1f,
+                    rotationDegrees = 0f,
                     offsetX = 0f,
                     offsetY = 0f
                 )
@@ -627,7 +750,125 @@ class CanvasViewModel : ViewModel() {
 
     fun clearTracingImage() {
         _uiState.update { state ->
-            state.copy(tracing = TracingReferenceState())
+            state.copy(
+                tracing = TracingReferenceState(),
+                isAdjustingTracing = false
+            )
+        }
+        syncTracingBaseExclusion()
+    }
+
+    /**
+     * Analiza en Rust la imagen de calco actual a la escala vigente sobre el lienzo
+     * para sugerir grosores de trazo (ojos/detalles, contorno, grueso) y paleta de coloreado.
+     */
+    fun analyzeTracingWithAi(forceRefresh: Boolean = false) {
+        val activeSession = session ?: return
+        val tracing = _uiState.value.tracing
+        val bmp = tracing.bitmap ?: return
+        if (tracing.isAnalyzingAi) return
+        if (!forceRefresh &&
+            tracing.aiAnalysis != null &&
+            abs(tracing.aiAnalyzedScale - tracing.scale) < 0.04f
+        ) {
+            return
+        }
+
+        val targetScale = tracing.scale
+        _uiState.update { it.copy(tracing = it.tracing.copy(isAnalyzingAi = true)) }
+        viewModelScope.launch {
+            val result = activeSession.analyzeTracingBitmap(bmp, targetScale)
+            _uiState.update { state ->
+                if (state.tracing.bitmap !== bmp) {
+                    state.copy(tracing = state.tracing.copy(isAnalyzingAi = false))
+                } else {
+                    state.copy(
+                        tracing = state.tracing.copy(
+                            aiAnalysis = result,
+                            aiAnalyzedScale = targetScale,
+                            isAnalyzingAi = false
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    /** Aplica un grosor de trazo recomendado por la IA local directamente al pincel activo. */
+    fun applyTracingStrokePreset(
+        preset: TracingStrokePreset,
+        useDetectedOutlineColor: Boolean = false
+    ) {
+        val outlineArgb = _uiState.value.tracing.aiAnalysis?.outlineColorArgb
+        _uiState.update { state ->
+            val nextColor = if (useDetectedOutlineColor && outlineArgb != null) {
+                outlineArgb
+            } else {
+                state.brush.argbColor
+            }
+            val nextRecent = if (useDetectedOutlineColor && outlineArgb != null) {
+                (listOf(outlineArgb) + state.recentColors.filter { it != outlineArgb }).take(10)
+            } else {
+                state.recentColors
+            }
+            state.copy(
+                brush = state.brush.copy(
+                    tool = preset.tool,
+                    argbColor = nextColor,
+                    radiusPx = preset.radiusPx.coerceIn(1f, 120f),
+                    hardness = preset.hardness.coerceIn(0f, 1f),
+                    opacity = preset.opacity.coerceIn(0.05f, 1f)
+                ),
+                recentColors = nextRecent,
+                isPanMode = false,
+                isAdjustingTracing = false,
+                statusBanner = "Trazo IA: ${preset.title} (${preset.radiusPx.roundToInt()} px)"
+            )
+        }
+    }
+
+    /** Aplica un color extraído del calco para trazar o rellenar con Bote de Pintura. */
+    fun applyTracingColor(
+        argbColor: Int,
+        switchToBucket: Boolean = false,
+        recommendedTolerance: Int? = null
+    ) {
+        _uiState.update { state ->
+            val updatedRecent = (listOf(argbColor) + state.recentColors.filter { it != argbColor }).take(10)
+            val nextTool = when {
+                switchToBucket -> ToolType.BUCKET
+                state.brush.tool == ToolType.ERASER || state.brush.tool == ToolType.EYEDROPPER -> ToolType.BRUSH
+                else -> state.brush.tool
+            }
+            state.copy(
+                brush = state.brush.copy(
+                    tool = nextTool,
+                    argbColor = argbColor,
+                    fillTolerance = recommendedTolerance?.coerceIn(0, 96) ?: state.brush.fillTolerance
+                ),
+                recentColors = updatedRecent,
+                isPanMode = false,
+                isAdjustingTracing = false,
+                statusBanner = if (switchToBucket) {
+                    "Color y Relleno listos para colorear"
+                } else {
+                    "Color del calco seleccionado"
+                }
+            )
+        }
+    }
+
+    /** Guarda todos los colores sugeridos por la IA en los colores recientes del selector HSV. */
+    fun saveTracingPaletteToRecents() {
+        val palette = _uiState.value.tracing.aiAnalysis?.palette ?: return
+        if (palette.isEmpty()) return
+        _uiState.update { state ->
+            val extracted = palette.map { it.argbColor }
+            val merged = (extracted + state.recentColors).distinct().take(12)
+            state.copy(
+                recentColors = merged,
+                statusBanner = "Paleta de ${extracted.size} colores guardada en el selector"
+            )
         }
     }
 

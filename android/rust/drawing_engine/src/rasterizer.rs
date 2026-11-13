@@ -1,9 +1,9 @@
 //! Rasterizador 2D puro en Rust para TrazoStudio.
 //! Contiene la lógica matemática de interpolación de trazos, sellado antialias (SDF radial),
 //! borrado por resta de alfa, relleno por inundación iterativo (scanline flood fill)
-//! y muestreo de color (cuentagotas).
+//! con respaldo incremental de baldosas para Undo/Redo eficiente.
 
-use crate::types::{BrushConfig, BrushKind, RgbaColor};
+use crate::types::{BrushConfig, BrushKind, PendingUndoTransaction, RgbaColor};
 
 /// Dibuja un segmento interpolado suavemente entre `(x0, y0)` y `(x1, y1)` sobre `pixels`.
 /// Se calcula el espaciado en función del radio para evitar cortes cuando el usuario mueve el dedo rápido.
@@ -173,7 +173,8 @@ pub fn blend_source_over_pixel(pixels: &mut [u8], idx: usize, src: RgbaColor, sr
 }
 
 /// Relleno por inundación iterativo (scanline flood fill) seguro para móvil:
-/// evita recursión profunda para prevenir StackOverflow en dispositivos ARM de 32 y 64 bits.
+/// evita recursión profunda para prevenir StackOverflow en dispositivos ARM de 32 y 64 bits,
+/// y respalda perezosamente solo las baldosas 64×64 realmente modificadas en `undo_tx`.
 pub fn flood_fill(
     pixels: &mut [u8],
     width: u32,
@@ -182,6 +183,7 @@ pub fn flood_fill(
     start_y: i32,
     fill_color: RgbaColor,
     tolerance: u8,
+    mut undo_tx: Option<&mut PendingUndoTransaction>,
 ) -> bool {
     if start_x < 0 || start_y < 0 || start_x >= width as i32 || start_y >= height as i32 {
         return false;
@@ -212,7 +214,10 @@ pub fn flood_fill(
 
     while let Some((x, y)) = stack.pop() {
         let mut lx = x;
-        while lx > 0 && !visited[y * w + (lx - 1)] && pixel_within_tol(pixels, (y * w + (lx - 1)) * 4, target, tol) {
+        while lx > 0
+            && !visited[y * w + (lx - 1)]
+            && pixel_within_tol(pixels, (y * w + (lx - 1)) * 4, target, tol)
+        {
             lx -= 1;
         }
 
@@ -227,6 +232,10 @@ pub fn flood_fill(
             }
 
             visited[cell] = true;
+            if let Some(tx) = undo_tx.as_deref_mut() {
+                tx.capture_pixel(cx, y, pixels);
+            }
+
             let p_idx = cell * 4;
             pixels[p_idx] = fill_color.r;
             pixels[p_idx + 1] = fill_color.g;
@@ -246,7 +255,8 @@ pub fn flood_fill(
 
             if y + 1 < h {
                 let down_cell = (y + 1) * w + cx;
-                let down_matches = !visited[down_cell] && pixel_within_tol(pixels, down_cell * 4, target, tol);
+                let down_matches =
+                    !visited[down_cell] && pixel_within_tol(pixels, down_cell * 4, target, tol);
                 if !span_below && down_matches {
                     stack.push((cx, y + 1));
                     span_below = true;

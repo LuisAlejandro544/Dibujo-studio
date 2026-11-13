@@ -1,6 +1,5 @@
 package com.trazostudio.draw.ui.gallery
 
-import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -76,9 +75,7 @@ import com.trazostudio.draw.data.ProjectStorage
 import com.trazostudio.draw.data.SavedDrawingItem
 import com.trazostudio.draw.data.StudioPreferences
 import com.trazostudio.draw.ui.theme.studioTopBarWindowInsets
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -102,7 +99,8 @@ fun GalleryScreen(
     preferences: StudioPreferences,
     onOpenNewCanvas: (title: String, width: Int, height: Int) -> Unit,
     onOpenSavedArtwork: (SavedDrawingItem) -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    bottomBar: @Composable () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -186,7 +184,8 @@ fun GalleryScreen(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
             )
-        }
+        },
+        bottomBar = bottomBar
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -379,9 +378,7 @@ private fun SavedArtworkCard(
     var thumbnail by remember(item.previewFile) { mutableStateOf<android.graphics.Bitmap?>(null) }
 
     LaunchedEffect(item.previewFile) {
-        thumbnail = withContext(Dispatchers.IO) {
-            BitmapFactory.decodeFile(item.previewFile.absolutePath)
-        }
+        thumbnail = ProjectStorage.decodeThumbnailBitmap(item.previewFile)
     }
 
     val dateStr = remember(item.modifiedAtMs) {

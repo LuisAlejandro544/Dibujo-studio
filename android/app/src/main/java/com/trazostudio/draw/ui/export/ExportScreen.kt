@@ -87,7 +87,7 @@ fun ExportScreen(
     var previewBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     var isExporting by remember { mutableStateOf(false) }
 
-    LaunchedEffect(includeBackground, state.stats.strokeCount, state.stats.layerCount) {
+    LaunchedEffect(includeBackground, state.bitmap, state.stats.strokeCount, state.stats.layerCount) {
         val bytes = viewModel.exportPngBytes(includeBackground)
         pngBytes = bytes
         previewBitmap = withContext(Dispatchers.Default) {
@@ -210,13 +210,7 @@ fun ExportScreen(
                     if (bytes.isEmpty()) return@Button
                     scope.launch {
                         isExporting = true
-                        ProjectStorage.saveProjectPreview(
-                            context,
-                            state.projectTitle,
-                            state.canvasWidth,
-                            state.canvasHeight,
-                            bytes
-                        )
+                        viewModel.saveProjectFiles(context)
                         val result = ProjectStorage.exportPngToGallery(
                             context,
                             state.projectTitle,

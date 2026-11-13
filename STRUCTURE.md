@@ -39,9 +39,10 @@ Mapa detallado de carpetas y archivos del repositorio.
     │   └── drawing_engine/          # Crate nativo Rust (`trazo_engine`)
     │       ├── Cargo.toml           # Dependencias permisivas (jni, png, bytemuck, parking_lot)
     │       └── src/
-    │           ├── lib.rs           # Puente JNI 32/64-bit (incluye nativeApplySegmentsBatch)
+    │           ├── lib.rs           # Puente JNI 32/64-bit (incluye batches, .trazo y análisis IA)
     │           ├── engine.rs        # Estado del lienzo, dirty_rect, lotes, capas, Undo/Redo y PNG
     │           ├── rasterizer.rs    # Pinceles SDF, interpolación, borrador y flood fill
+    │           ├── tracing_ai.rs    # Asistente IA local: medición de grosores y paleta K-Means++
     │           └── types.rs         # Tipos base (BrushConfig, Layer, RgbaColor, Snapshot)
     │
     ├── core/
@@ -70,17 +71,18 @@ Mapa detallado de carpetas y archivos del repositorio.
                 │   ├── ProjectStorage.kt              # Almacenamiento IO, MediaStore, Share y decodificación de calco
                 │   └── StudioPreferencesRepository.kt # Preferencias con DataStore
                 └── ui/
-                    ├── theme/Theme.kt                 # 3 paletas Material 3 e insets seguros (cámara/isla dinámica)
-                    ├── navigation/TrazoNavHost.kt     # Rutas entre las 4 pantallas
+                    ├── theme/Theme.kt                 # 3 paletas Material 3 e insets seguros sin hueco superior
+                    ├── navigation/TrazoNavHost.kt     # Rutas con transiciones suaves y barra inferior raíz
                     ├── gallery/GalleryScreen.kt       # Inicio, plantillas y obras guardadas
                     ├── export/ExportScreen.kt         # Vista previa y exportación PNG
                     ├── settings/SettingsScreen.kt     # Ajustes y diagnóstico ABI Rust
                     └── canvas/
-                        ├── CanvasViewModel.kt         # Cola por lotes, modo Mover/Dibujar, calco y capas
-                        ├── CanvasScreen.kt            # Estudio fullscreen, botón Mover (pan/zoom/rotación), calco y gestos
+                        ├── CanvasViewModel.kt         # Cola por lotes, modo Mover/Dibujar, calco táctil, IA y capas
+                        ├── CanvasScreen.kt            # Estudio fullscreen, dock de 2 niveles, calco táctil e IA
                         └── popups/
                             ├── BrushSettingsPopup.kt  # Popup tamaño, opacidad y dureza
                             ├── ColorPickerPopup.kt    # Popup selector HSV y muestras (negro por defecto)
                             ├── LayersPopup.kt         # Popup gestor de capas
-                            └── TracingReferencePopup.kt # Popup calco desde galería (tamaño, opacidad, posición y visibilidad)
+                            ├── TracingReferencePopup.kt # Popup calco (gestos, IA, tamaño, opacidad y visibilidad)
+                            └── TracingAiPopup.kt      # Popup Asistente IA de calco (grosores y colores)
 ```

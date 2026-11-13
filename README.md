@@ -7,14 +7,14 @@
   - **Motor nativo en Rust (`trazo_engine`)**:
   - Rasterización 2D con antialias SDF radial, interpolación suave y procesamiento por lotes (`apply_segments_batch`).
   - Recomposición parcial por región sucia (`dirty_rect`) y doble búfer de `Bitmap` reutilizable en Kotlin para trazos instantáneos.
+  - **Asistente IA local de Calco (`tracing_ai.rs`)**: analiza sin conexión el grosor real de las líneas de la imagen escalada al lienzo (detalles/ojos, contorno principal y trazo grueso) y extrae por K-Means++ el color de tinta y la paleta para colorear.
   - Herramientas reales: **Pincel**, **Marcador**, **Aerógrafo**, **Borrador** (resta de alfa), **Relleno por inundación iterativo** (*scanline flood fill*) y **Cuentagotas**.
-  - Sistema multicapa (visibilidad, opacidad por capa, combinar hacia abajo, añadir y eliminar capas).
-  - Historial **Undo / Redo** con instantáneas por capa.
-  - Exportación real a **PNG** en memoria mediante el crate `png`.
+  - Sistema multicapa (visibilidad, opacidad por capa, combinar hacia abajo, añadir y eliminar capas) y guardado editable `.trazo`.
+  - Historial **Undo / Redo** incremental por baldosas `64×64` con presupuesto de memoria para 32 y 64 bits, y codificación **PNG** en memoria mediante el crate `png`.
 - **Interfaz modular en Kotlin + Jetpack Compose + Material 3**:
   - **Modo pantalla completa inmersivo con soporte de cámara / isla dinámica**: oculta la barra de estado/notificaciones y la barra de navegación del sistema, reservando automáticamente margen superior seguro en las barras superiores (`studioTopBarWindowInsets`) para no chocar con cámaras perforadas ni cápsulas dinámicas.
-  - **Galería / Inicio**: Plantillas rápidas, historial de obras locales y popup para lienzos personalizados.
-  - **Estudio de Dibujo**: Lienzo interactivo con botón para alternar entre **Mover** (arrastre, zoom y rotación libre con 2 dedos) y **Dibujar** (con compensación exacta del ángulo al trazar), color inicial **negro puro (`#000000`)**, **Calco desde galería** (redimensionable, con control de opacidad, posición y botón rápido para mostrar/ocultar sin incluirse en la exportación), barra superior compacta, barra inferior de herramientas con **Material Icons Extended** y popups modales de color HSV, ajustes de pincel, calco y capas.
+  - **Galería / Inicio**: Plantillas rápidas, miniaturas escaladas eficientes, historial de obras locales y popup para lienzos personalizados.
+  - **Estudio de Dibujo**: Lienzo interactivo con botón para alternar entre **Mover** (arrastre, zoom y rotación libre con 2 dedos) y **Dibujar** (con compensación exacta del ángulo al trazar), color inicial **negro puro (`#000000`)**, **Calco desde galería** (mover, escalar y girar directamente con los dedos sobre el lienzo, modo debajo del trazo o Multiplicar encima sin incluirse al exportar), **Asistente IA de Calco** (aplicación en un toque de grosor de trazo, tinta, paleta y bote de relleno), barra superior compacta, barra inferior de herramientas con **Material Icons Extended** y popups modales de color HSV, ajustes de pincel, calco, IA y capas.
   - **Exportar Obra**: Vista previa PNG, modo transparente opcional, guardado en `Pictures/TrazoStudio` (`MediaStore`) y compartir vía `FileProvider`.
   - **Ajustes del Estudio**: 3 paletas visuales, resolución predeterminada, gestos multitáctiles y diagnóstico de arquitectura Rust.
 - **Soporte configurable de arquitecturas**:

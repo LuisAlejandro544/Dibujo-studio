@@ -10,7 +10,7 @@ Documento de contexto técnico para mantener coherencia arquitectónica y de pro
 
 ## Decisiones arquitectónicas obligatorias
 1. **Motor en Rust obligatorio (sin fallbacks en Kotlin)**:
-   - Toda la lógica gráfica (trazos, antialias, borrador, flood fill, cuentagotas, composición de capas, Undo/Redo y codificación PNG) vive en `android/rust/drawing_engine`.
+   - Toda la lógica gráfica y de visión por computador (trazos, antialias, borrador, flood fill, cuentagotas, composición de capas, Undo/Redo, codificación PNG y análisis IA local del calco en `tracing_ai.rs`) vive en `android/rust/drawing_engine`.
    - `android/core/engine/build.gradle.kts` enlaza la tarea `buildRustNativeLibs` (`cargo ndk`) a `preBuild`. Nunca se debe saltar la compilación nativa ni sustituirla por funciones de `android.graphics.Canvas` en Kotlin.
 2. **Soporte 32 bits y 64 bits configurable (`-PtrazoAbiMode`)**:
    - Modo `universal` (predeterminado): `armeabi-v7a`, `arm64-v8a`, `x86`, `x86_64`.
@@ -25,9 +25,9 @@ Documento de contexto técnico para mantener coherencia arquitectónica y de pro
    - Usar únicamente dependencias `Apache-2.0`, `MIT` o `Zlib`. Prohibido introducir librerías GPL/AGPL o que exijan abrir el código o mostrar créditos obligatorios en la UI.
 6. **Diseño UI y modo inmersivo**:
    - Evitar el minimalismo extremo.
-   - Modo pantalla completa inmersivo en `MainActivity` ocultando barra de notificaciones y botones de navegación del sistema (`WindowInsetsCompat.Type.systemBars()`), aplicando `studioTopBarWindowInsets()` en todas las `TopAppBar` para respetar cámaras perforadas e islas dinámicas.
-   - Separar funcionalidades en **pantallas dedicadas** (`GalleryScreen`, `CanvasScreen`, `ExportScreen`, `SettingsScreen`) y usar **popups / hojas modales** (`BrushSettingsPopup`, `ColorPickerPopup`, `LayersPopup`, `TracingReferencePopup`, `NewCanvasPopupDialog`) para paneles secundarios.
-   - En `CanvasScreen` incluir botón para alternar entre **Mover** (pan, zoom y rotación del lienzo) y **Dibujar** (con transformación inversa de rotación), color inicial **negro puro** (`0xFF000000`) y opción **Calco** desde galería (tamaño, opacidad, posición y visibilidad sin alterar el PNG exportado).
+   - Modo pantalla completa inmersivo en `MainActivity` (`LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS` en Android 11+) ocultando barra de notificaciones y barra de navegación del sistema, aplicando `studioTopBarWindowInsets()` solo cuando existe `displayCutout > 0` para evitar franjas vacías arriba.
+   - Separar funcionalidades en **pantallas dedicadas** (`GalleryScreen`, `CanvasScreen`, `ExportScreen`, `SettingsScreen`) con barra inferior raíz (`Galería` / `Ajustes`), transiciones animadas y **popups / hojas modales** (`BrushSettingsPopup`, `ColorPickerPopup`, `LayersPopup`, `TracingReferencePopup`, `TracingAiPopup`, `NewCanvasPopupDialog`).
+   - En `CanvasScreen` incluir dock de 2 niveles (controles rápidos arriba + las 6 herramientas visibles sin scroll abajo), confirmación al salir con trazos sin guardar, botón **Mover/Dibujar**, color inicial **negro puro** (`0xFF000000`), **Calco** manipulable con dedos y **Asistente IA de Calco** 100% offline en Rust.
    - Conservar diseño, iconos y lógica existente salvo petición expresa.
 7. **Comentarios en el código**:
    - Todos los archivos de código deben incluir comentarios claros (en español) explicando qué hace su lógica.

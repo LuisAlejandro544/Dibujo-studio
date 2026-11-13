@@ -3,16 +3,17 @@
 //! - Cada instancia vive en un `Mutex<DrawingEngine>` asignado en el heap de Rust y expuesto como `jlong`.
 //! - `jlong` tiene siempre 64 bits en JNI, por lo que convertir punteros `*mut EngineHandle` funciona
 //!   de forma segura tanto en ARMv7/x86 (32 bits) como en ARM64/x86_64 (64 bits).
-//! - La transferencia de píxeles a Kotlin se realiza mediante `ByteBuffer.allocateDirect(...)`,
-//!   evitando copias intermedias en el heap de la JVM.
+//! - La transferencia incremental de píxeles a Kotlin copia únicamente la subregión modificada
+//!   (`nativePrepareRender` + `nativeCopyRegionArgb`), evitando mover todo el búfer en cada cuadro.
 
 mod engine;
 mod rasterizer;
+mod tracing_ai;
 mod types;
 
 use std::sync::Arc;
 
-use jni::objects::{JByteArray, JByteBuffer, JClass, JFloatArray, JString};
+use jni::objects::{JByteArray, JByteBuffer, JClass, JFloatArray, JIntArray, JString};
 use jni::sys::{jboolean, jfloat, jint, jlong, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 use parking_lot::Mutex;
@@ -82,6 +83,19 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeBegi
     unsafe {
         with_engine(handle_ptr, |engine| {
             engine.begin_stroke_transaction();
+        });
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeEndStroke(
+    _env: JNIEnv,
+    _class: JClass,
+    handle_ptr: jlong,
+) {
+    unsafe {
+        with_engine(handle_ptr, |engine| {
+            engine.end_stroke_transaction();
         });
     }
 }
@@ -210,7 +224,8 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativePick
     y: jint,
 ) -> jint {
     unsafe {
-        with_engine(handle_ptr, |engine| engine.pick_color(x, y).to_argb_int()).unwrap_or(0xFF000000_u32 as i32)
+        with_engine(handle_ptr, |engine| engine.pick_color(x, y).to_argb_int())
+            .unwrap_or(0xFF000000_u32 as i32)
     }
 }
 
@@ -271,7 +286,8 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeDele
     index: jint,
 ) -> jboolean {
     let ok = unsafe {
-        with_engine(handle_ptr, |engine| engine.delete_layer(index.max(0) as usize)).unwrap_or(false)
+        with_engine(handle_ptr, |engine| engine.delete_layer(index.max(0) as usize))
+            .unwrap_or(false)
     };
     if ok { JNI_TRUE } else { JNI_FALSE }
 }
@@ -334,6 +350,80 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeMerg
     if ok { JNI_TRUE } else { JNI_FALSE }
 }
 
+/// Activa o desactiva la omisión de la capa base blanca al renderizar en pantalla
+/// para que el calco se dibuje detrás de los trazos sin velarlos.
+#[no_mangle]
+pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeSetExcludeBaseLayer(
+    _env: JNIEnv,
+    _class: JClass,
+    handle_ptr: jlong,
+    exclude: jboolean,
+) {
+    unsafe {
+        with_engine(handle_ptr, |engine| {
+            engine.set_exclude_base_layer(exclude == JNI_TRUE);
+        });
+    }
+}
+
+/// Recompone únicamente la región sucia pendiente y escribe `[x, y, w, h]` en `out_rect`.
+#[no_mangle]
+pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativePrepareRender(
+    env: JNIEnv,
+    _class: JClass,
+    handle_ptr: jlong,
+    out_rect: JIntArray,
+) -> jboolean {
+    let rect_opt = unsafe { with_engine(handle_ptr, |engine| engine.prepare_render_rect()) }.flatten();
+    if let Some((x, y, w, h)) = rect_opt {
+        let vals = [x as i32, y as i32, w as i32, h as i32];
+        let _ = env.set_int_array_region(&out_rect, 0, &vals);
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
+}
+
+/// Copia únicamente los píxeles de la subregión `(x, y, w, h)` en formato ARGB (`0xAARRGGBB`)
+/// hacia `out_argb` para actualizar solo el área modificada del `Bitmap` en Kotlin.
+#[no_mangle]
+pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeCopyRegionArgb(
+    env: JNIEnv,
+    _class: JClass,
+    handle_ptr: jlong,
+    x: jint,
+    y: jint,
+    w: jint,
+    h: jint,
+    out_argb: JIntArray,
+) -> jboolean {
+    if x < 0 || y < 0 || w <= 0 || h <= 0 {
+        return JNI_FALSE;
+    }
+    let count = (w as usize).saturating_mul(h as usize);
+    let Ok(arr_len) = env.get_array_length(&out_argb) else {
+        return JNI_FALSE;
+    };
+    if (arr_len as usize) < count {
+        return JNI_FALSE;
+    }
+
+    let mut region = vec![0i32; count];
+    let ok = unsafe {
+        with_engine(handle_ptr, |engine| {
+            engine.copy_region_argb(x as u32, y as u32, w as u32, h as u32, &mut region)
+        })
+        .unwrap_or(false)
+    };
+    if !ok {
+        return JNI_FALSE;
+    }
+    if env.set_int_array_region(&out_argb, 0, &region).is_err() {
+        return JNI_FALSE;
+    }
+    JNI_TRUE
+}
+
 /// Copia la imagen compuesta RGBA8888 al ByteBuffer directo proporcionado por Kotlin.
 #[no_mangle]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeRenderToDirectBuffer(
@@ -376,13 +466,47 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeExpo
 ) -> JByteArray<'local> {
     let bytes = unsafe {
         with_engine(handle_ptr, |engine| {
-            engine.encode_png(include_background == JNI_TRUE).unwrap_or_default()
+            engine
+                .encode_png(include_background == JNI_TRUE)
+                .unwrap_or_default()
         })
         .unwrap_or_default()
     };
 
     env.byte_array_from_slice(&bytes)
         .unwrap_or_else(|_| JByteArray::default())
+}
+
+/// Exporta el proyecto completo con todas sus capas en formato binario `.trazo`.
+#[no_mangle]
+pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeExportProject<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle_ptr: jlong,
+) -> JByteArray<'local> {
+    let bytes = unsafe {
+        with_engine(handle_ptr, |engine| engine.encode_project().unwrap_or_default())
+            .unwrap_or_default()
+    };
+    env.byte_array_from_slice(&bytes)
+        .unwrap_or_else(|_| JByteArray::default())
+}
+
+/// Carga un proyecto `.trazo` conservando todas las capas, opacidad, visibilidad y nombres.
+#[no_mangle]
+pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeLoadProject(
+    env: JNIEnv,
+    _class: JClass,
+    handle_ptr: jlong,
+    project_bytes: JByteArray,
+) -> jboolean {
+    let Ok(bytes) = env.convert_byte_array(&project_bytes) else {
+        return JNI_FALSE;
+    };
+    let ok = unsafe {
+        with_engine(handle_ptr, |engine| engine.load_project(&bytes).is_ok()).unwrap_or(false)
+    };
+    if ok { JNI_TRUE } else { JNI_FALSE }
 }
 
 /// Carga un PNG guardado previamente en el lienzo activo dentro de Rust.
@@ -402,27 +526,30 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeLoad
     if ok { JNI_TRUE } else { JNI_FALSE }
 }
 
-/// Devuelve metadatos compactos de estado: [layerCount, activeLayer, canUndo, canRedo, strokeCount].
+/// Devuelve metadatos compactos de estado:
+/// [layerCount, activeLayer, canUndo, canRedo, strokeCount, baseVisible, baseModified].
 #[no_mangle]
 pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeGetStats<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle_ptr: jlong,
-) -> jni::objects::JIntArray<'local> {
+) -> JIntArray<'local> {
     let values = unsafe {
         with_engine(handle_ptr, |engine| {
             [
                 engine.layers.len() as i32,
                 engine.active_layer_index as i32,
-                if engine.undo_stack.is_empty() { 0 } else { 1 },
+                if engine.can_undo() { 1 } else { 0 },
                 if engine.redo_stack.is_empty() { 0 } else { 1 },
                 engine.stroke_count.min(i32::MAX as u64) as i32,
+                if engine.base_layer_visible() { 1 } else { 0 },
+                if engine.base_layer_modified { 1 } else { 0 },
             ]
         })
-        .unwrap_or([0, 0, 0, 0, 0])
+        .unwrap_or([0, 0, 0, 0, 0, 1, 0])
     };
 
-    let arr = env.new_int_array(5).expect("No se pudo crear JIntArray");
+    let arr = env.new_int_array(7).expect("No se pudo crear JIntArray");
     let _ = env.set_int_array_region(&arr, 0, &values);
     arr
 }
@@ -469,4 +596,42 @@ pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeGetA
     let pointer_bits = std::mem::size_of::<usize>() * 8;
     let info = format!("Rust {} ({}-bit)", arch, pointer_bits);
     env.new_string(info).unwrap_or_else(|_| JString::default())
+}
+
+/// Analiza en Rust la imagen de calco (grosores de línea escalados al lienzo y paleta para colorear)
+/// devolviendo un manifiesto compacto de líneas `META|...` y `COLOR|...`.
+#[no_mangle]
+pub extern "system" fn Java_com_trazostudio_engine_NativeEngineBridge_nativeAnalyzeTracingImage<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    argb_pixels: JIntArray<'local>,
+    width: jint,
+    height: jint,
+    rendered_width_on_canvas: jfloat,
+) -> JString<'local> {
+    init_android_logging();
+    let w = width.max(0) as usize;
+    let h = height.max(0) as usize;
+    let needed = w.saturating_mul(h);
+
+    let Ok(arr_len) = env.get_array_length(&argb_pixels) else {
+        return env.new_string("").unwrap_or_else(|_| JString::default());
+    };
+    if needed == 0 || (arr_len.max(0) as usize) < needed {
+        return env.new_string("").unwrap_or_else(|_| JString::default());
+    }
+
+    let mut pixels = vec![0i32; needed];
+    if env.get_int_array_region(&argb_pixels, 0, &mut pixels).is_err() {
+        return env.new_string("").unwrap_or_else(|_| JString::default());
+    }
+
+    let report = tracing_ai::analyze_tracing_image(
+        &pixels,
+        width.max(0) as u32,
+        height.max(0) as u32,
+        rendered_width_on_canvas,
+    );
+    env.new_string(report.to_manifest())
+        .unwrap_or_else(|_| JString::default())
 }

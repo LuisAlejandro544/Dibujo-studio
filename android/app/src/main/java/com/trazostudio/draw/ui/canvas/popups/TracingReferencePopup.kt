@@ -21,9 +21,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CenterFocusStrong
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.OpenWith
 import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Visibility
@@ -31,6 +33,8 @@ import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -64,6 +68,9 @@ fun TracingReferencePopup(
     tracing: TracingReferenceState,
     onPickImageUri: (android.net.Uri) -> Unit,
     onToggleVisibility: (Boolean) -> Unit,
+    onChangeOverlayOnTop: (Boolean) -> Unit,
+    onEnterFingerAdjustMode: () -> Unit,
+    onOpenAiAssistant: () -> Unit,
     onChangeScale: (Float) -> Unit,
     onChangeOpacity: (Float) -> Unit,
     onChangeOffset: (Float, Float) -> Unit,
@@ -162,7 +169,7 @@ fun TracingReferencePopup(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "Elige una foto o boceto de tu galería para colocarlo encima del lienzo y calcar encima con tu pincel.",
+                        text = "Elige una foto o boceto de tu galería para colocarlo debajo de tus trazos (sin opacar tus colores) o encima en modo multiplicar.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -220,6 +227,60 @@ fun TracingReferencePopup(
                     )
                 }
 
+                // Botón principal para manipular el calco directamente en el lienzo con los dedos
+                Button(
+                    onClick = {
+                        onEnterFingerAdjustMode()
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.OpenWith,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Mover y escalar con los dedos")
+                }
+
+                // Asistente IA local en Rust: analiza grosores de trazo (ojos, contorno) y paleta para colorear
+                FilledTonalButton(
+                    onClick = {
+                        onDismiss()
+                        onOpenAiAssistant()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Asistente IA: grosor de trazos y colores")
+                }
+
+                // Posición del calco respecto a los trazos del usuario
+                Text("Posición del calco", fontWeight = FontWeight.Medium)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = !tracing.overlayOnTop,
+                        onClick = { onChangeOverlayOnTop(false) },
+                        label = { Text("Debajo del trazo") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterChip(
+                        selected = tracing.overlayOnTop,
+                        onClick = { onChangeOverlayOnTop(true) },
+                        label = { Text("Encima (Multiplicar)") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
                 // Tamaño (más grande o pequeño) con botones de paso fino y barra deslizante
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -238,18 +299,18 @@ fun TracingReferencePopup(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
-                        onClick = { onChangeScale((tracing.scale - 0.1f).coerceAtLeast(0.2f)) }
+                        onClick = { onChangeScale((tracing.scale - 0.1f).coerceAtLeast(0.15f)) }
                     ) {
                         Icon(Icons.Rounded.Remove, contentDescription = "Hacer más pequeño")
                     }
                     Slider(
                         value = tracing.scale,
                         onValueChange = onChangeScale,
-                        valueRange = 0.2f..3f,
+                        valueRange = 0.15f..5f,
                         modifier = Modifier.weight(1f)
                     )
                     IconButton(
-                        onClick = { onChangeScale((tracing.scale + 0.1f).coerceAtMost(3f)) }
+                        onClick = { onChangeScale((tracing.scale + 0.1f).coerceAtMost(5f)) }
                     ) {
                         Icon(Icons.Rounded.Add, contentDescription = "Hacer más grande")
                     }
@@ -287,7 +348,7 @@ fun TracingReferencePopup(
                 Slider(
                     value = tracing.offsetX,
                     onValueChange = { onChangeOffset(it, tracing.offsetY) },
-                    valueRange = -0.75f..0.75f
+                    valueRange = -1.5f..1.5f
                 )
 
                 Row(
@@ -303,7 +364,7 @@ fun TracingReferencePopup(
                 Slider(
                     value = tracing.offsetY,
                     onValueChange = { onChangeOffset(tracing.offsetX, it) },
-                    valueRange = -0.75f..0.75f
+                    valueRange = -1.5f..1.5f
                 )
 
                 // Acciones secundarias: centrar/restablecer o quitar calco

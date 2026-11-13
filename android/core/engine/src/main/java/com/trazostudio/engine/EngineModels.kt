@@ -43,5 +43,63 @@ data class CanvasStats(
     val activeLayerIndex: Int = 1,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
-    val strokeCount: Int = 0
+    val strokeCount: Int = 0,
+    val baseLayerVisible: Boolean = true,
+    val baseLayerModified: Boolean = false
+)
+
+/** Estilo visual detectado por el analizador nativo en Rust sobre la imagen de calco. */
+enum class TracingStyleKind(val code: Int, val labelEs: String, val tipEs: String) {
+    LINE_ART(
+        0,
+        "Contorno definido",
+        "Ideal para calcar líneas limpias en capa superior y rellenar con Bote o Marcador."
+    ),
+    SKETCH(
+        1,
+        "Boceto o trazo suave",
+        "Usa Pincel con dureza media-alta para seguir las líneas de lápiz o sombreado."
+    ),
+    PAINTING_OR_PHOTO(
+        2,
+        "Foto o pintura sin contorno",
+        "Sigue los bordes principales con trazo fino y bloquea colores base con Marcador."
+    ),
+    LOW_DETAIL(
+        3,
+        "Pocos trazos / imagen clara",
+        "Se sugieren grosores equilibrados según el tamaño actual del calco en el lienzo."
+    );
+
+    companion object {
+        fun fromCode(code: Int): TracingStyleKind = entries.firstOrNull { it.code == code } ?: LOW_DETAIL
+    }
+}
+
+/** Recomendación de grosor de trazo lista para aplicar con un toque al pincel activo. */
+data class TracingStrokePreset(
+    val title: String,
+    val subtitle: String,
+    val tool: ToolType,
+    val radiusPx: Float,
+    val hardness: Float,
+    val opacity: Float = 1f
+)
+
+/** Color extraído por K-Means++ en Rust para trazar contorno o colorear el dibujo. */
+data class TracingPaletteColor(
+    val argbColor: Int,
+    val coveragePercent: Int,
+    val isOutline: Boolean,
+    val roleLabel: String
+)
+
+/** Resultado completo del asistente local de calco generado nativamente en Rust. */
+data class TracingAiAnalysis(
+    val style: TracingStyleKind,
+    val strokePresets: List<TracingStrokePreset>,
+    val recommendedFillTolerance: Int,
+    val outlineColorArgb: Int,
+    val inkRatioPercent: Int,
+    val palette: List<TracingPaletteColor>
 )

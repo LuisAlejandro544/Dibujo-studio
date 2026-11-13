@@ -1,9 +1,23 @@
 package com.trazostudio.draw.ui.navigation
 
 import android.net.Uri
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Collections
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -46,11 +60,49 @@ fun TrazoNavHost(
     // ViewModel compartido entre CanvasScreen y ExportScreen para transferir la sesión Rust activa sin perder el lienzo.
     val canvasViewModel: CanvasViewModel = viewModel()
 
+    fun navigateToRootTab(route: String) {
+        navController.navigate(route) {
+            popUpTo(TrazoRoutes.GALLERY) {
+                saveState = true
+            }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+
     NavHost(
         navController = navController,
-        startDestination = TrazoRoutes.GALLERY
+        startDestination = TrazoRoutes.GALLERY,
+        enterTransition = {
+            slideIntoContainer(
+                towards = AnimatedContentTransitionScope.SlideDirection.Start,
+                animationSpec = tween(220)
+            ) + fadeIn(animationSpec = tween(180))
+        },
+        exitTransition = {
+            slideOutOfContainer(
+                towards = AnimatedContentTransitionScope.SlideDirection.Start,
+                animationSpec = tween(220)
+            ) + fadeOut(animationSpec = tween(160))
+        },
+        popEnterTransition = {
+            slideIntoContainer(
+                towards = AnimatedContentTransitionScope.SlideDirection.End,
+                animationSpec = tween(220)
+            ) + fadeIn(animationSpec = tween(180))
+        },
+        popExitTransition = {
+            slideOutOfContainer(
+                towards = AnimatedContentTransitionScope.SlideDirection.End,
+                animationSpec = tween(220)
+            ) + fadeOut(animationSpec = tween(160))
+        }
     ) {
-        composable(TrazoRoutes.GALLERY) {
+        composable(
+            route = TrazoRoutes.GALLERY,
+            enterTransition = { fadeIn(animationSpec = tween(180)) },
+            exitTransition = { fadeOut(animationSpec = tween(160)) }
+        ) {
             GalleryScreen(
                 preferences = preferences,
                 onOpenNewCanvas = { title, width, height ->
@@ -62,7 +114,14 @@ fun TrazoNavHost(
                     navController.navigate(TrazoRoutes.canvasRoute(item.title, item.width, item.height))
                 },
                 onOpenSettings = {
-                    navController.navigate(TrazoRoutes.SETTINGS)
+                    navigateToRootTab(TrazoRoutes.SETTINGS)
+                },
+                bottomBar = {
+                    StudioRootBottomBar(
+                        selectedRoute = TrazoRoutes.GALLERY,
+                        onSelectGallery = { navigateToRootTab(TrazoRoutes.GALLERY) },
+                        onSelectSettings = { navigateToRootTab(TrazoRoutes.SETTINGS) }
+                    )
                 }
             )
         }
@@ -80,7 +139,7 @@ fun TrazoNavHost(
             val height = backStackEntry.arguments?.getInt("height") ?: preferences.defaultHeight
 
             val uiState by canvasViewModel.uiState.collectAsState()
-            androidx.compose.runtime.LaunchedEffect(title, width, height) {
+            LaunchedEffect(title, width, height) {
                 if (
                     !uiState.isBusy &&
                     uiState.bitmap == null &&
@@ -111,14 +170,64 @@ fun TrazoNavHost(
             )
         }
 
-        composable(TrazoRoutes.SETTINGS) {
+        composable(
+            route = TrazoRoutes.SETTINGS,
+            enterTransition = { fadeIn(animationSpec = tween(180)) },
+            exitTransition = { fadeOut(animationSpec = tween(160)) }
+        ) {
             SettingsScreen(
                 preferences = preferences,
                 preferencesRepo = preferencesRepo,
                 onNavigateBack = {
-                    navController.popBackStack()
+                    navigateToRootTab(TrazoRoutes.GALLERY)
+                },
+                bottomBar = {
+                    StudioRootBottomBar(
+                        selectedRoute = TrazoRoutes.SETTINGS,
+                        onSelectGallery = { navigateToRootTab(TrazoRoutes.GALLERY) },
+                        onSelectSettings = { navigateToRootTab(TrazoRoutes.SETTINGS) }
+                    )
                 }
             )
         }
+    }
+}
+
+/**
+ * Barra inferior compartida entre las pantallas raíz (Galería y Ajustes) para navegar
+ * cómodamente con el pulgar sin acumular copias repetidas en el historial.
+ */
+@Composable
+private fun StudioRootBottomBar(
+    selectedRoute: String,
+    onSelectGallery: () -> Unit,
+    onSelectSettings: () -> Unit
+) {
+    NavigationBar(
+        containerColor = MaterialTheme.colorScheme.surface,
+        tonalElevation = 4.dp
+    ) {
+        NavigationBarItem(
+            selected = selectedRoute == TrazoRoutes.GALLERY,
+            onClick = onSelectGallery,
+            icon = {
+                Icon(
+                    imageVector = Icons.Rounded.Collections,
+                    contentDescription = "Galería"
+                )
+            },
+            label = { Text("Galería") }
+        )
+        NavigationBarItem(
+            selected = selectedRoute == TrazoRoutes.SETTINGS,
+            onClick = onSelectSettings,
+            icon = {
+                Icon(
+                    imageVector = Icons.Rounded.Settings,
+                    contentDescription = "Ajustes"
+                )
+            },
+            label = { Text("Ajustes") }
+        )
     }
 }

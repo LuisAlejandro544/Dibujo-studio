@@ -81,8 +81,9 @@ private val WarmPaperColors = lightColorScheme(
 )
 
 /**
- * Calcula un margen superior seguro para las TopAppBar en modo inmersivo, evitando que la
- * cámara perforada o una cápsula/isla dinámica tape el título o los botones superiores.
+ * Calcula un margen superior seguro para las TopAppBar en modo inmersivo:
+ * solo agrega separación cuando la ventana dibuja detrás de un recorte/cámara física (`cutoutTopPx > 0`),
+ * evitando huecos vacíos en dispositivos que ya ajustan el área superior del sistema.
  */
 @Composable
 fun studioTopBarWindowInsets(): WindowInsets {
@@ -90,9 +91,11 @@ fun studioTopBarWindowInsets(): WindowInsets {
     val layoutDirection = LocalLayoutDirection.current
     val cutout = WindowInsets.displayCutout
     val cutoutTopPx = cutout.getTop(density)
-    val extraPadPx = with(density) { 10.dp.roundToPx() }
-    val minIslandSafePx = with(density) { 38.dp.roundToPx() }
-    val safeTopPx = maxOf(cutoutTopPx + extraPadPx, minIslandSafePx)
+    val safeTopPx = if (cutoutTopPx > 0) {
+        cutoutTopPx + with(density) { 4.dp.roundToPx() }
+    } else {
+        0
+    }
 
     return WindowInsets(
         left = cutout.getLeft(density, layoutDirection),

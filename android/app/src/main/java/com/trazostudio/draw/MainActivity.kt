@@ -50,11 +50,17 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Oculta la barra de notificaciones (status bar) y la barra de navegación del sistema
-     * usando modo inmersivo temporal al deslizar desde los bordes.
+     * usando modo inmersivo temporal al deslizar desde los bordes y extendiendo el contenido
+     * hasta el borde superior para evitar franjas negras vacías.
      */
     private fun applyImmersiveFullscreen() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             window.attributes = window.attributes.apply {
                 layoutInDisplayCutoutMode =
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES

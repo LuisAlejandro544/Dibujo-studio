@@ -5,7 +5,7 @@ import java.nio.ByteBuffer
 /**
  * Puente directo JNI hacia la librería compilada en Rust (`libtrazo_engine.so`).
  * No existen implementaciones de respaldo en Kotlin: todo el dibujado, capas,
- * relleno y exportación PNG ocurren exclusivamente en Rust.
+ * relleno, serialización `.trazo` y exportación PNG ocurren exclusivamente en Rust.
  */
 internal object NativeEngineBridge {
     init {
@@ -16,6 +16,8 @@ internal object NativeEngineBridge {
     external fun nativeDestroyEngine(handlePtr: Long)
 
     external fun nativeBeginStroke(handlePtr: Long)
+    external fun nativeEndStroke(handlePtr: Long)
+
     external fun nativeApplyDab(
         handlePtr: Long,
         x: Float,
@@ -72,10 +74,29 @@ internal object NativeEngineBridge {
     external fun nativeSetActiveLayer(handlePtr: Long, index: Int)
     external fun nativeMergeLayerDown(handlePtr: Long, index: Int): Boolean
 
+    external fun nativeSetExcludeBaseLayer(handlePtr: Long, exclude: Boolean)
+    external fun nativePrepareRender(handlePtr: Long, outRect: IntArray): Boolean
+    external fun nativeCopyRegionArgb(
+        handlePtr: Long,
+        x: Int,
+        y: Int,
+        w: Int,
+        h: Int,
+        outArgb: IntArray
+    ): Boolean
+
     external fun nativeRenderToDirectBuffer(handlePtr: Long, directBuffer: ByteBuffer): Boolean
     external fun nativeExportPng(handlePtr: Long, includeBackground: Boolean): ByteArray
+    external fun nativeExportProject(handlePtr: Long): ByteArray
+    external fun nativeLoadProject(handlePtr: Long, projectBytes: ByteArray): Boolean
     external fun nativeLoadPng(handlePtr: Long, pngBytes: ByteArray): Boolean
     external fun nativeGetStats(handlePtr: Long): IntArray
     external fun nativeGetLayersManifest(handlePtr: Long): String
     external fun nativeGetArchInfo(): String
+    external fun nativeAnalyzeTracingImage(
+        argbPixels: IntArray,
+        width: Int,
+        height: Int,
+        renderedWidthOnCanvas: Float
+    ): String
 }

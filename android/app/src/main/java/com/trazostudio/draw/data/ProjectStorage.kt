@@ -26,14 +26,16 @@ data class SavedDrawingItem(
     val width: Int,
     val height: Int,
     val previewFile: File,
+    val projectFile: File? = null,
     val modifiedAtMs: Long
 )
 
 /**
  * Capa de persistencia en disco (Dispatchers.IO) para:
- * 1. Guardar capturas PNG de los proyectos creados dentro de `filesDir/projects`.
- * 2. Exportar el PNG codificado por Rust hacia la galería pública (`MediaStore.Images`).
- * 3. Preparar URIs seguras mediante `FileProvider` para compartir hacia otras apps.
+ * 1. Guardar capturas PNG de vista previa y proyectos editables multicapa `.trazo` en `filesDir/projects`.
+ * 2. Decodificar miniaturas reducidas (`decodeThumbnailBitmap`) para evitar picos de RAM en Galería.
+ * 3. Exportar el PNG codificado por Rust hacia la galería pública (`MediaStore.Images`).
+ * 4. Preparar URIs seguras mediante `FileProvider` para compartir hacia otras apps.
  */
 object ProjectStorage {
 
@@ -41,6 +43,10 @@ object ProjectStorage {
         val dir = File(context.filesDir, "projects")
         if (!dir.exists()) dir.mkdirs()
         return dir
+    }
+
+    private fun pairedTrazoFile(previewFile: File): File {
+        return File(previewFile.parentFile, "${previewFile.nameWithoutExtension}.trazo")
     }
 
     suspend fun listSavedDrawings(context: Context): List<SavedDrawingItem> =
@@ -55,13 +61,15 @@ object ProjectStorage {
                 val title = parts.getOrNull(0)?.replace('_', ' ') ?: baseName
                 val w = parts.getOrNull(1)?.toIntOrNull() ?: 1080
                 val h = parts.getOrNull(2)?.toIntOrNull() ?: 1080
+                val trazoFile = File(dir, "$baseName.trazo").takeIf { it.exists() }
                 SavedDrawingItem(
                     id = baseName,
                     title = title,
                     width = w,
                     height = h,
                     previewFile = file,
-                    modifiedAtMs = file.lastModified()
+                    projectFile = trazoFile,
+                    modifiedAtMs = max(file.lastModified(), trazoFile?.lastModified() ?: 0L)
                 )
             }.sortedByDescending { it.modifiedAtMs }
         }
@@ -72,7 +80,8 @@ object ProjectStorage {
         width: Int,
         height: Int,
         pngBytes: ByteArray,
-        previousFile: File? = null
+        previousFile: File? = null,
+        projectBytes: ByteArray? = null
     ): File = withContext(Dispatchers.IO) {
         val safeTitle = projectTitle
             .trim()
@@ -81,11 +90,19 @@ object ProjectStorage {
             .replace(' ', '_')
             .take(28)
         val stamp = System.currentTimeMillis()
-        val fileName = "${safeTitle}__${width}__${height}__${stamp}.png"
-        val outFile = File(projectsDir(context), fileName)
+        val baseName = "${safeTitle}__${width}__${height}__${stamp}"
+        val dir = projectsDir(context)
+        val outFile = File(dir, "$baseName.png")
         outFile.writeBytes(pngBytes)
-        if (previousFile != null && previousFile.absolutePath != outFile.absolutePath && previousFile.exists()) {
-            previousFile.delete()
+
+        if (projectBytes != null && projectBytes.isNotEmpty()) {
+            File(dir, "$baseName.trazo").writeBytes(projectBytes)
+        }
+
+        if (previousFile != null && previousFile.absolutePath != outFile.absolutePath) {
+            if (previousFile.exists()) previousFile.delete()
+            val prevTrazo = pairedTrazoFile(previousFile)
+            if (prevTrazo.exists()) prevTrazo.delete()
         }
         outFile
     }
@@ -97,7 +114,39 @@ object ProjectStorage {
     }
 
     suspend fun deleteSavedDrawing(file: File): Boolean = withContext(Dispatchers.IO) {
+        val trazoFile = pairedTrazoFile(file)
+        if (trazoFile.exists()) {
+            trazoFile.delete()
+        }
         if (file.exists()) file.delete() else false
+    }
+
+    /**
+     * Decodifica una miniatura reducida desde disco usando `inSampleSize` para mantener
+     * bajo el consumo de memoria en dispositivos de 32 y 64 bits dentro de `GalleryScreen`.
+     */
+    suspend fun decodeThumbnailBitmap(
+        file: File,
+        maxDimension: Int = 512
+    ): Bitmap? = withContext(Dispatchers.IO) {
+        runCatching {
+            if (!file.exists()) return@runCatching null
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, bounds)
+            val srcW = bounds.outWidth
+            val srcH = bounds.outHeight
+            if (srcW <= 0 || srcH <= 0) return@runCatching null
+
+            var sampleSize = 1
+            while ((srcW / sampleSize) > maxDimension || (srcH / sampleSize) > maxDimension) {
+                sampleSize *= 2
+            }
+            val decodeOpts = BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.RGB_565
+            }
+            BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
+        }.getOrNull()
     }
 
     suspend fun exportPngToGallery(
@@ -161,7 +210,7 @@ object ProjectStorage {
     suspend fun decodeTracingBitmap(
         context: Context,
         uri: Uri,
-        maxDimension: Int = 1600
+        maxDimension: Int = 2048
     ): Bitmap? = withContext(Dispatchers.IO) {
         runCatching {
             val resolver = context.contentResolver
